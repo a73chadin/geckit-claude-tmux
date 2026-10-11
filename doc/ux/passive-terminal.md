@@ -131,3 +131,50 @@ The host logger records `usage.command.sent` after `/usage` is submitted, and ch
 ## 14. Synthetic-message regression
 
 The resumed native probe transcript wrote No response requested with isApiErrorMessage false immediately before a user's Hi and a normal assistant reply. The first passive driver incorrectly classified every synthetic record as a failure. Failure detection now requires isApiErrorMessage true. A later real assistant response clears an error after recovery. All three tests pass, including benign synthetic, flagged API error and recovered error cases. The regression is covered by the integration test.
+
+## 15. Passive background tasks
+
+The tmux driver reads background task starts from saved tool results, including `backgroundTaskId` for commands and `isAsync` with `agentId` for helpers. It emits the existing task signals so GeckIt's card and Background dialog show work after the reply ends. Output paths come from the result or Claude's per-project, per-session task folder. No prompts, hooks, `/tasks` submissions or extra model requests are added.
+
+| Surface | Visible result | When visible |
+| --- | --- | --- |
+| Existing card | "A command running" or the existing helper state | A tracked background task runs |
+| Existing Background dialog | "Running", "Finished", "Failed" or "Stopped" with command/output details | A task is discovered |
+| Existing task output | "Nothing printed yet." | A running task's file is empty |
+
+| State | Trigger | User action |
+| --- | --- | --- |
+| Running | A saved result identifies background work | Read its output or continue chatting |
+| Finished | Exit code 0 or a completion notice | Read or clear the task |
+| Failed | Nonzero exit code or a failure notice | Read output, then decide next step |
+| Stopped | A stop notice or the owning Claude process closes | Read or clear the task |
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> running: Saved result
+    running --> completed: Successful exit
+    running --> failed: Failed exit
+    running --> stopped: Process closes
+    completed --> [*]: Clear
+    failed --> [*]: Clear
+    stopped --> [*]: Clear
+```
+
+| From | Event | To | Visible result |
+| --- | --- | --- | --- |
+| Unlisted | Poll reads a background result, automatically | Running | Task appears in Background |
+| Running | Poll reads an exit marker or notice, automatically | Finished/Failed/Stopped | Task stays listed with its final state |
+| Running | Claude's owning process closes, automatically | Stopped | Running indicator ends |
+| Finished/Failed/Stopped | User presses Clear | Unlisted | Task disappears and is not emitted again on unchanged polls |
+| Saved history | A new Claude process resumes, automatically | Finished/Failed/Stopped | Old tasks retain final states; unresolved old tasks are stopped |
+
+Polling uses the existing 500 ms cadence. Each running command reads at most the last 512 bytes of output, enough for the exit marker without loading large logs. Empty, missing or silent output never means completion. A helper's output is a transcript; completion comes from task notices, not a guessed period of silence. Completed task output paths remain available to the host reader.
+
+A terminal footer count alone has no task ID or command, so it does not create invented tasks or decide which task ended. Historical "shell still running" summary lines are not authoritative. Local `!` background launches are tracked when Claude saves an ID; detached jobs with no Claude task record remain outside this list. Native Stop controls still belong to Claude's terminal; this change adds discovery and status, not a terminal task-control protocol.
+
+No polling messages or file errors appear in chat. Partial JSONL records wait for the newline. Repeated records emit only changed task state. Old replies are not replayed when task history is reconstructed. Closing a foreground turn does not stop background tasks, and known running tasks keep the driver available under the host's existing idle rules.
+
+Verification covers saved starts, helpers, notifications, partial records, empty/missing output, successful/failed exit markers, repeated polls, resumed history and process closure using fake Claude in isolated tmux. Full-window visual verification is recorded separately; shared task components, tokens and layout are unchanged.
+
+Native verification read the active Claude 2.1.296 session transcript and task output files without sending terminal input: the tracker distinguished completed commands from the currently running command. Computer Use denied access to GeckIt Local. Full-window light/dark, focus/keyboard, scrolling and desktop/phone viewport review could not be performed. No shared renderer component or style changed. Performance checklist scope is unchanged; stable polls emit no task updates, and output reads are bounded.

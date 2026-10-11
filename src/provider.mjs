@@ -1,10 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import * as claude from "./claude-runtime.mjs";
+import { backgroundTasks } from "./background-tasks.mjs";
 const typingDelay = () => 15 + Math.floor(Math.random() * 31);
 const object = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 const string = (value) => typeof value === "string" ? value : "";
@@ -92,6 +95,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
     }
     hear({ items, gone, signals });
   };
+  const tasks = backgroundTasks(options.root, options.id, environment(), (task) => emit([], [], [{ kind: "task", task }]));
   const read = async () => {
     const path = await claudeFile(options.root, options.id);
     if (path === void 0) return;
@@ -125,6 +129,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
       } catch {
         continue;
       }
+      await tasks.read(entry);
       if (entry["isSidechain"] === true) continue;
       if (entry["type"] === "system" && entry["subtype"] === "local_command" && entry["commandRun"] !== void 0) activity = true;
       if (entry["isMeta"] === true) continue;
@@ -228,6 +233,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
     reading = reading.then(async () => {
       if (++polls % 4 === 0 && !await alive()) throw new Error("Claude Code exited.");
       await read();
+      await tasks.poll();
       await inspect();
     }).catch(async () => {
       if (!running || ended) return;
@@ -240,7 +246,22 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
   const start = async () => {
     if (ended) return;
     const path = await claudeFile(options.root, options.id);
-    if (path !== void 0) offset = (await stat(path)).size;
+    if (path !== void 0) {
+      offset = (await stat(path)).size;
+      if (offset > 0) {
+        const lines = createInterface({ input: createReadStream(path, { end: offset - 1 }), crlfDelay: Infinity });
+        try {
+          for await (const line of lines) {
+            let entry;
+            try { entry = JSON.parse(line); } catch { continue; }
+            await tasks.read(entry, true);
+          }
+        } finally { lines.close(); }
+        await tasks.poll(true);
+        tasks.stopped(true);
+        tasks.publish();
+      }
+    }
     const env = environment();
     const omitted = [...OFF_PLAN, ...Object.keys(planOnly()).filter((key) => key.startsWith("GECKIT_"))];
     const config = env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
@@ -277,6 +298,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
   };
   const close = async () => {
     if (ended) return;
+    tasks.stopped();
     ended = true;
     running = false;
     clearInterval(poll);

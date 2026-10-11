@@ -17,6 +17,8 @@ let menu
 let timer
 let input = ''
 let busy = false
+let backgroundFile
+let backgroundCount = 0
 const queued = []
 let pasting = false
 let typed = false
@@ -36,6 +38,18 @@ const say = (prompt) => {
   record({ prompt })
   if (prompt === 'crash') process.exit(1)
   if (prompt === '/usage') { paint(`Settings  Status   Config   Usage   Stats\n\nCurrent session\n████          25% used\nResets 3pm (Test/Zone)\n\nCurrent week (all models)\n██            7% used\nResets Oct 14, 9:30am (Test/Zone)\nEsc to cancel\n`); return }
+  if (prompt === 'background') {
+    const taskId = ++backgroundCount === 1 ? 'shell-one' : 'shell-two'
+    const useId = 'background-use-' + backgroundCount
+    backgroundFile = join(process.env.CLAUDE_CONFIG_DIR, 'background.output')
+    writeFileSync(backgroundFile, '')
+    write({ type: 'assistant', uuid: useId, timestamp: new Date().toISOString(), message: { model: 'claude-test', content: [{ type: 'tool_use', id: useId, name: 'Bash', input: { command: 'tail -f copy.log', description: 'Watch copy' } }] } })
+    const entry = { type: 'user', timestamp: new Date().toISOString(), toolUseResult: { backgroundTaskId: taskId, outputFile: backgroundFile }, message: { content: [{ type: 'tool_result', tool_use_id: useId, content: '' }] } }
+    const bytes = JSON.stringify(entry) + '\n'
+    appendFileSync(file, bytes.slice(0, -10))
+    timer = setTimeout(() => { appendFileSync(file, bytes.slice(-10)); reply('Watching in the background') }, 1200)
+    working(); return
+  }
   if (prompt === 'quiet') { idle(); return }
   if (prompt === '/local') {
     write({ type: 'system', subtype: 'local_command', isMeta: true, commandRun: '/local', content: 'Local result' })
@@ -104,6 +118,7 @@ setInterval(() => {
   try { command = readFileSync(control, 'utf8') } catch { return }
   if (!command) return
   writeFileSync(control, '')
+  if (command === 'background-end' && backgroundFile) writeFileSync(backgroundFile, 'copy complete\n\n[exited with code 0]\n')
   if (command === 'change' && menu) { menu = { title: 'New question', options: ['Stay', 'Leave'] }; selection = 0; choices() }
   if (command === 'release' && busy && queued.length > 0) { record({ consumed: queued.shift() }); reply('injection consumed') }
 }, 40)

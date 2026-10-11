@@ -7,9 +7,11 @@ var __export = (target, all) => {
 // src/provider.mjs
 import { execFile as execFile2 } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, open as open3, rm as rm2, stat as stat3, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface as createInterface4 } from "node:readline";
+import { mkdir, mkdtemp, open as open4, rm as rm2, stat as stat3, writeFile } from "node:fs/promises";
 import { homedir as homedir5, tmpdir } from "node:os";
-import { join as join4 } from "node:path";
+import { join as join5 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 // src/claude-runtime.mjs
@@ -410,9 +412,9 @@ var list = (value) => Array.isArray(value) ? value : [];
 var MOST = 4e3;
 var WRITES = /* @__PURE__ */ new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 var COMMANDS = /* @__PURE__ */ new Set(["Bash", "PowerShell"]);
-function picturesIn(content, budget) {
+function picturesIn(content2, budget) {
   const out = [];
-  for (const block of list(content)) {
+  for (const block of list(content2)) {
     const one = object(block);
     if (string2(one["type"]) !== "image") continue;
     const source = object(one["source"]);
@@ -423,9 +425,9 @@ function picturesIn(content, budget) {
   }
   return out;
 }
-function resultText(content) {
-  if (typeof content === "string") return content;
-  return list(content).map((block) => string2(object(block)["text"])).filter((part) => part !== "").join("\n");
+function resultText(content2) {
+  if (typeof content2 === "string") return content2;
+  return list(content2).map((block) => string2(object(block)["text"])).filter((part) => part !== "").join("\n");
 }
 var clipped = (body) => body.length > MOST ? `${body.slice(0, MOST)}
 ... (${String(body.length - MOST)} more characters)` : body;
@@ -434,7 +436,7 @@ var INTERRUPTED = /^\[Request interrupted by user/;
 var SUMMARY_HEAD = /^This session is being continued[^\n]*\n+Summary:\n/;
 var HELD = /^Stop hook feedback:\n\[([\s\S]*?)\]: ([\s\S]*)$/;
 var TASK_NOTIFICATION = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/;
-var tagged = (body, tag) => new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`).exec(body)?.[1]?.trim() ?? "";
+var tagged = (body, tag2) => new RegExp(`<${tag2}>([\\s\\S]*?)</${tag2}>`).exec(body)?.[1]?.trim() ?? "";
 function taskNote(id, status, summary) {
   if (id === "" || summary === "" || status === "stopped" || status === "killed") return void 0;
   return { kind: "note", id: `task:${id}`, note: "task", text: summary };
@@ -452,7 +454,7 @@ function keepTask(state, out, task) {
 }
 var BASH_INPUT = /^\s*<bash-input>([\s\S]*)<\/bash-input>\s*$/;
 var BASH_OUTPUT = /^\s*<bash-stdout>([\s\S]*)<\/bash-stdout>\s*<bash-stderr>([\s\S]*)<\/bash-stderr>\s*$/;
-var textsOf = (content) => typeof content === "string" ? [content] : list(content).map(object).filter((block) => string2(block["type"]) === "text").map((block) => string2(block["text"]));
+var textsOf = (content2) => typeof content2 === "string" ? [content2] : list(content2).map(object).filter((block) => string2(block["type"]) === "text").map((block) => string2(block["text"]));
 var REFUSED = "The person reading said no to this. Do not try it another way; say what you would have done instead.";
 var AGAIN = "The person changed how this session may act while this was waiting. Make the same tool call again, unchanged.";
 var refused = (said) => said.includes(REFUSED) || said.startsWith("The user doesn't want to proceed with this tool use");
@@ -470,8 +472,8 @@ function flush(state, out) {
   state.thought = false;
 }
 function stamped(entry) {
-  const at = Date.parse(string2(entry["timestamp"]));
-  return Number.isNaN(at) ? {} : { at };
+  const at2 = Date.parse(string2(entry["timestamp"]));
+  return Number.isNaN(at2) ? {} : { at: at2 };
 }
 function assistantBlocks(state, message, out) {
   const inner = object(message["message"]);
@@ -627,8 +629,8 @@ function costOf(entries) {
 function planWindow(value) {
   const window = object(value);
   const part = window["utilization"];
-  const at = window["resetsAt"];
-  return typeof part === "number" && typeof at === "number" ? { part, resetsAt: at * 1e3 } : void 0;
+  const at2 = window["resetsAt"];
+  return typeof part === "number" && typeof at2 === "number" ? { part, resetsAt: at2 * 1e3 } : void 0;
 }
 function plan(fiveHour, sevenDay) {
   if (fiveHour === void 0 && sevenDay === void 0) return void 0;
@@ -699,11 +701,11 @@ function readClaude(state, message) {
       const id = string2(message["task_id"]);
       const patch = object(message["patch"]);
       const task = state.tasks.get(id);
-      const ended = ENDED[string2(patch["status"])];
+      const ended2 = ENDED[string2(patch["status"])];
       if (patch["is_backgrounded"] === true) state.backgrounded.add(id);
       if (task !== void 0) {
         const end = typeof patch["end_time"] === "number" ? patch["end_time"] : Date.now();
-        keepTask(state, out, ended === void 0 ? task : { ...task, status: ended, ended: task.ended ?? end });
+        keepTask(state, out, ended2 === void 0 ? task : { ...task, status: ended2, ended: task.ended ?? end });
       }
     } else if (subtype === "task_progress") {
       const task = state.tasks.get(string2(message["task_id"]));
@@ -760,8 +762,8 @@ function readClaude(state, message) {
   }
   if (type === "user") {
     if (toolResults(state, message, out)) return out;
-    const content = object(message["message"])["content"];
-    const said = typeof content === "string" ? content : resultText(content);
+    const content2 = object(message["message"])["content"];
+    const said = typeof content2 === "string" ? content2 : resultText(content2);
     if (state.summarised !== void 0 && (message["isCompactSummary"] === true || message["isSynthetic"] === true)) {
       out.items.push({ kind: "note", id: state.summarised, note: "summarised", text: SUMMARISED, detail: said.replace(SUMMARY_HEAD, "").trim() });
       state.summarised = void 0;
@@ -778,8 +780,8 @@ function readClaude(state, message) {
     const said = plan(planWindow(windows["five_hour"]), planWindow(windows["seven_day"]));
     if (said !== void 0) out.signals.push({ kind: "plan", plan: said });
     if (string2(info["status"]) === "rejected") {
-      const at = typeof info["resetsAt"] === "number" ? info["resetsAt"] * 1e3 : void 0;
-      state.limit = at === void 0 ? {} : { resetsAt: at };
+      const at2 = typeof info["resetsAt"] === "number" ? info["resetsAt"] * 1e3 : void 0;
+      state.limit = at2 === void 0 ? {} : { resetsAt: at2 };
     }
     return out;
   }
@@ -863,7 +865,7 @@ function goalNote(entry) {
 }
 function goalOf(entries) {
   let goal;
-  let ended;
+  let ended2;
   let met = false;
   for (const entry of entries) {
     const said = goalStatus(entry);
@@ -871,30 +873,30 @@ function goalOf(entries) {
     const reason = string2(said["reason"]);
     if (said["met"] === true || said["failed"] === true) {
       goal = void 0;
-      ended = goalNote(entry);
+      ended2 = goalNote(entry);
       met = said["met"] === true;
     } else if (said["sentinel"] === true) {
       goal = { condition: string2(said["condition"]), checks: 0 };
-      ended = void 0;
+      ended2 = void 0;
     } else if (goal !== void 0) {
       goal = { condition: goal.condition, checks: goal.checks + 1, ...reason === "" ? {} : { reason } };
     }
   }
-  return { ...goal === void 0 ? {} : { goal }, ...ended === void 0 ? {} : { ended, met } };
+  return { ...goal === void 0 ? {} : { goal }, ...ended2 === void 0 ? {} : { ended: ended2, met } };
 }
 function tasksOf(entries) {
   const tools = /* @__PURE__ */ new Map();
   const tasks = /* @__PURE__ */ new Map();
   for (const entry of entries) {
     if (entry["isSidechain"] === true) continue;
-    const at = Date.parse(string2(entry["timestamp"]));
+    const at2 = Date.parse(string2(entry["timestamp"]));
     const type = string2(entry["type"]);
-    const content = object(entry["message"])["content"];
+    const content2 = object(entry["message"])["content"];
     if (type === "assistant") {
-      for (const block of list(content)) {
+      for (const block of list(content2)) {
         const use = object(block);
         if (string2(use["type"]) === "tool_use") {
-          tools.set(string2(use["id"]), { tool: string2(use["name"]), input: object(use["input"]), at });
+          tools.set(string2(use["id"]), { tool: string2(use["name"]), input: object(use["input"]), at: at2 });
         }
       }
       continue;
@@ -902,11 +904,11 @@ function tasksOf(entries) {
     if (type !== "user") continue;
     const id = string2(object(entry["toolUseResult"])["backgroundTaskId"]);
     if (id !== "") {
-      const result = list(content).map(object).find((block) => string2(block["type"]) === "tool_result");
+      const result = list(content2).map(object).find((block) => string2(block["type"]) === "tool_result");
       const use = string2(result?.["tool_use_id"]);
       const started = tools.get(use);
       const command = string2(started?.input["command"]);
-      const began = started?.at ?? at;
+      const began = started?.at ?? at2;
       tasks.set(id, {
         id,
         kind: started?.tool === "Monitor" ? "monitor" : started?.tool === "Agent" ? "local_agent" : "local_bash",
@@ -918,7 +920,7 @@ function tasksOf(entries) {
       });
       continue;
     }
-    for (const text2 of textsOf(content)) {
+    for (const text2 of textsOf(content2)) {
       const told = TASK_NOTIFICATION.exec(text2);
       if (told === null) continue;
       const body = told[1] ?? "";
@@ -929,7 +931,7 @@ function tasksOf(entries) {
       tasks.set(task.id, {
         ...task,
         status: ENDED[tagged(body, "status")] ?? "completed",
-        ended: Number.isNaN(at) ? task.started : at,
+        ended: Number.isNaN(at2) ? task.started : at2,
         ...output === "" ? {} : { output },
         ...exit === void 0 ? {} : { exit: Number(exit) }
       });
@@ -953,8 +955,8 @@ function replayClaude(root, entries, quietFor) {
     const type = string2(entry["type"]);
     if (entry["isSidechain"] === true || entry["isMeta"] === true) continue;
     if (type === "user") {
-      const content = object(entry["message"])["content"];
-      const typed2 = typeof content === "string" || !list(content).some((block) => string2(object(block)["type"]) === "tool_result");
+      const content2 = object(entry["message"])["content"];
+      const typed2 = typeof content2 === "string" || !list(content2).some((block) => string2(object(block)["type"]) === "tool_result");
       if (!typed2) {
         take(readClaude(state, { ...entry, tool_use_result: entry["toolUseResult"] }));
         continue;
@@ -964,7 +966,7 @@ function replayClaude(root, entries, quietFor) {
         continue;
       }
       const words = [];
-      for (const [index, text2] of textsOf(content).entries()) {
+      for (const [index, text2] of textsOf(content2).entries()) {
         const told = TASK_NOTIFICATION.exec(text2);
         if (told !== null) {
           const body = told[1] ?? "";
@@ -994,7 +996,7 @@ function replayClaude(root, entries, quietFor) {
       const written = words.join("\n");
       const command = tagged(written, "command-name");
       const said = command.startsWith("/") ? `${command} ${tagged(written, "command-args")}`.trim() : written;
-      const pictures = picturesIn(content, budget);
+      const pictures = picturesIn(content2, budget);
       if (NOT_SAID.test(said)) continue;
       if (said.trim() === "" && pictures.length === 0) continue;
       const out2 = empty();
@@ -1022,16 +1024,16 @@ function replayClaude(root, entries, quietFor) {
     }
     if (type === "assistant") {
       const inner = object(entry["message"]);
-      const blocks = list(inner["content"]).map(object);
-      open32 = !(string2(inner["stop_reason"]) === "end_turn" || blocks.every((block) => string2(block["type"]) === "text"));
+      const blocks2 = list(inner["content"]).map(object);
+      open32 = !(string2(inner["stop_reason"]) === "end_turn" || blocks2.every((block) => string2(block["type"]) === "text"));
       take(readClaude(state, entry));
       continue;
     }
     if (type === "system" && string2(entry["subtype"]) === "compact_boundary") take(readClaude(state, entry));
-    const ended = goalNote(entry);
-    if (ended !== void 0) {
+    const ended2 = goalNote(entry);
+    if (ended2 !== void 0) {
       state.seq += 1;
-      items.set(`goal:${String(state.seq)}`, { ...ended, id: `goal:${String(state.seq)}` });
+      items.set(`goal:${String(state.seq)}`, { ...ended2, id: `goal:${String(state.seq)}` });
     }
   }
   const out = empty();
@@ -1050,9 +1052,9 @@ function replayClaude(root, entries, quietFor) {
 function lastSaid(entries) {
   for (const entry of [...entries].reverse()) {
     if (string2(entry["type"]) !== "assistant" || entry["isSidechain"] === true) continue;
-    const content = object(entry["message"])["content"];
-    if (!Array.isArray(content)) continue;
-    const text2 = content.map((block) => string2(object(block)["type"]) === "text" ? string2(object(block)["text"]) : "").join("\n");
+    const content2 = object(entry["message"])["content"];
+    if (!Array.isArray(content2)) continue;
+    const text2 = content2.map((block) => string2(object(block)["type"]) === "text" ? string2(object(block)["text"]) : "").join("\n");
     if (text2.trim() !== "") return saidLine(text2);
   }
   return "";
@@ -1066,9 +1068,9 @@ function saidIn(entry) {
 function typed(entry) {
   if (string2(entry["type"]) !== "user" || entry["isSidechain"] === true || entry["isMeta"] === true) return "";
   if (entry["isCompactSummary"] === true) return "";
-  const content = object(entry["message"])["content"];
-  if (list(content).some((block) => string2(object(block)["type"]) === "tool_result")) return "";
-  return textsOf(content).filter((text2) => !/^\s*(<|\[Request interrupted|Caveat:)/.test(text2)).join("\n");
+  const content2 = object(entry["message"])["content"];
+  if (list(content2).some((block) => string2(object(block)["type"]) === "tool_result")) return "";
+  return textsOf(content2).filter((text2) => !/^\s*(<|\[Request interrupted|Caveat:)/.test(text2)).join("\n");
 }
 var PATIENCE = 2e4;
 var string3 = (value) => typeof value === "string" ? value : void 0;
@@ -1134,9 +1136,9 @@ function readBrowsers(root, pick) {
 var NAMED = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g;
 var BARE = /https?:\/\/[^\s<>"'`)\]]+/g;
 var TRAILING = /[.,;:!?]+$/;
-function linksInText(texts) {
+function linksInText(texts2) {
   const found = /* @__PURE__ */ new Map();
-  for (const said of [...texts].reverse()) {
+  for (const said of [...texts2].reverse()) {
     for (const [, text2 = "", url = ""] of said.matchAll(NAMED)) {
       const had = found.get(url);
       if (had === void 0 || had.text === void 0) found.set(url, text2 === url ? { url } : { url, text: text2 });
@@ -1256,8 +1258,8 @@ async function listClaude(root) {
   const below = (cwd) => cwd !== void 0 && !heads.includes(cwd) && heads.some((head) => within2(cwd, head)) ? cwd : void 0;
   const found = await rowsOf(files, (row, file) => !("near" in file) || below(row.cwd) !== void 0, MOST2);
   return found.map((row) => {
-    const at = below(row.cwd);
-    return at === void 0 ? row : { ...row, below: at };
+    const at2 = below(row.cwd);
+    return at2 === void 0 ? row : { ...row, below: at2 };
   });
 }
 var TEMPORARY = ["/private/tmp/", "/private/var/folders/", "/tmp/", "/var/folders/"];
@@ -1383,18 +1385,18 @@ async function readGoal(root, id) {
 async function goalAt(path) {
   return goalOf(await entriesOf(path, (line) => line.includes('"goal_status"')));
 }
-async function forkPoint(root, id, at) {
+async function forkPoint(root, id, at2) {
   const path = await claudeFile(root, id);
-  return path === void 0 ? void 0 : forkPointAt(path, at);
+  return path === void 0 ? void 0 : forkPointAt(path, at2);
 }
-async function forkPointAt(path, at) {
+async function forkPointAt(path, at2) {
   const said = (await entriesOf(path, (line) => line.includes('"uuid"'))).filter(
-    (entry) => (entry["type"] === "user" || entry["type"] === "assistant") && entry["isSidechain"] !== true && typeof entry["uuid"] === "string" && Date.parse(String(entry["timestamp"])) <= at
+    (entry) => (entry["type"] === "user" || entry["type"] === "assistant") && entry["isSidechain"] !== true && typeof entry["uuid"] === "string" && Date.parse(String(entry["timestamp"])) <= at2
   );
   const messageOf = (entry) => entry["message"]?.["id"];
   const calls = (entry) => {
-    const content = entry["message"]?.["content"];
-    return Array.isArray(content) && content.some((block) => block?.["type"] === "tool_use");
+    const content2 = entry["message"]?.["content"];
+    return Array.isArray(content2) && content2.some((block) => block?.["type"] === "tool_use");
   };
   let end = said.length - 1;
   const last = said[end];
@@ -1550,25 +1552,25 @@ function saidIn2(entry) {
   if (type === "user") {
     const words = typed(entry);
     if (words !== "") return words;
-    const content2 = object2(entry["message"])["content"];
-    if (!Array.isArray(content2) || content2.some((block) => string6(object2(block)["type"]) === "tool_result")) return "";
-    return content2.map((block) => string6(object2(block)["type"]) === "text" ? string6(object2(block)["text"]) : "").join("\n");
+    const content22 = object2(entry["message"])["content"];
+    if (!Array.isArray(content22) || content22.some((block) => string6(object2(block)["type"]) === "tool_result")) return "";
+    return content22.map((block) => string6(object2(block)["type"]) === "text" ? string6(object2(block)["text"]) : "").join("\n");
   }
   if (type !== "assistant") return "";
-  const content = object2(entry["message"])["content"];
-  if (!Array.isArray(content)) return "";
-  return content.map((block) => string6(object2(block)["type"]) === "text" ? string6(object2(block)["text"]) : "").join("\n");
+  const content2 = object2(entry["message"])["content"];
+  if (!Array.isArray(content2)) return "";
+  return content2.map((block) => string6(object2(block)["type"]) === "text" ? string6(object2(block)["text"]) : "").join("\n");
 }
 async function readOn(path, from, to, said, codex) {
   const file = await open2(path, "r");
   try {
-    let at = from;
+    let at2 = from;
     let carry = Buffer.alloc(0);
-    while (at < to) {
-      const length = Math.min(CHUNK2, to - at);
-      const { buffer, bytesRead } = await file.read(Buffer.alloc(length), 0, length, at);
+    while (at2 < to) {
+      const length = Math.min(CHUNK2, to - at2);
+      const { buffer, bytesRead } = await file.read(Buffer.alloc(length), 0, length, at2);
       if (bytesRead === 0) break;
-      at += bytesRead;
+      at2 += bytesRead;
       const joined = Buffer.concat([carry, buffer.subarray(0, bytesRead)]);
       const end = joined.lastIndexOf(10);
       if (end < 0) {
@@ -1588,7 +1590,7 @@ async function readOn(path, from, to, said, codex) {
       }
       carry = joined.subarray(end + 1);
     }
-    return at - carry.length;
+    return at2 - carry.length;
   } finally {
     await file.close();
   }
@@ -1611,7 +1613,7 @@ async function brought(path, size, codex = false) {
 function snippet(said, words) {
   const text2 = plain(said.text);
   const lower = text2.toLowerCase();
-  const first = Math.max(0, Math.min(...words.map((word) => lower.indexOf(word)).filter((at) => at >= 0)));
+  const first = Math.max(0, Math.min(...words.map((word) => lower.indexOf(word)).filter((at2) => at2 >= 0)));
   const start = Math.max(0, text2.lastIndexOf(" ", Math.max(0, first - AROUND)) + 1);
   const cut = text2.slice(start, start + SNIPPET).replace(/\s+/g, " ").trim();
   return `${start > 0 ? "..." : ""}${cut}${start + SNIPPET < text2.length ? "..." : ""}`;
@@ -1649,16 +1651,116 @@ function searchClaude(roots, asked, foldersOf = folders) {
   return searched;
 }
 
+// src/background-tasks.mjs
+import { open as open3, realpath as realpath2 } from "node:fs/promises";
+import { join as join4 } from "node:path";
+var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var string7 = (value) => typeof value === "string" ? value : "";
+var content = (entry) => object3(entry.message).content;
+var blocks = (entry) => Array.isArray(content(entry)) ? content(entry) : [];
+var texts = (entry) => typeof content(entry) === "string" ? [content(entry)] : blocks(entry).filter((block) => block.type === "text").map((block) => string7(block.text));
+var ended = { completed: "completed", failed: "failed", stopped: "stopped", killed: "stopped" };
+var tag = (text2, name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text2)?.[1]?.trim() ?? "";
+var at = (entry) => Date.parse(entry.timestamp) || Date.now();
+function backgroundTasks(root, session, env, changed) {
+  const tools = /* @__PURE__ */ new Map();
+  const tasks = /* @__PURE__ */ new Map();
+  let directory;
+  const output = async (id) => {
+    directory ??= Promise.all([
+      realpath2(env.CLAUDE_CODE_TMPDIR ?? "/tmp").catch(() => env.CLAUDE_CODE_TMPDIR ?? "/tmp"),
+      realpath2(root).catch(() => root)
+    ]).then(([temp, folder]) => join4(temp, `claude-${process.getuid()}`, folder.replace(/[^A-Za-z0-9]/g, "-"), session, "tasks"));
+    return join4(await directory, `${id}.output`);
+  };
+  const keep = (task, silent) => {
+    const previous = tasks.get(task.id);
+    if (previous !== void 0 && Object.keys(previous).length === Object.keys(task).length && Object.entries(task).every(([key, value]) => previous[key] === value)) return;
+    tasks.set(task.id, task);
+    if (!silent) changed(task);
+  };
+  return {
+    async read(entry, silent = false) {
+      if (entry.isSidechain === true) return;
+      if (entry.type === "assistant") {
+        for (const use2 of blocks(entry)) {
+          if (use2.type === "tool_use") tools.set(use2.id, { tool: use2.name, input: object3(use2.input), started: at(entry) });
+        }
+        return;
+      }
+      if (entry.type !== "user") return;
+      const result = object3(entry.toolUseResult ?? entry.tool_use_result);
+      const results = blocks(entry).filter((block) => block.type === "tool_result");
+      const use = results[0]?.tool_use_id;
+      const started = tools.get(use);
+      const id = string7(result.backgroundTaskId) || (result.isAsync === true ? string7(result.agentId) : "");
+      if (/^[A-Za-z0-9_-]+$/.test(id)) {
+        const previous = tasks.get(id);
+        const body = results.map((block) => typeof block.content === "string" ? block.content : "").join("\n");
+        const file = string7(result.outputFile) || /(?:Output is being written to|output_file): (\S+?)(?:\s|$)/.exec(body)?.[1];
+        keep({
+          id,
+          kind: started?.tool === "Agent" || result.isAsync === true ? "local_agent" : started?.tool === "Monitor" ? "monitor" : "local_bash",
+          what: string7(started?.input.description) || previous?.what || id,
+          status: "running",
+          started: started?.started ?? previous?.started ?? at(entry),
+          ...string7(started?.input.command) === "" ? {} : { command: started.input.command },
+          ...use === void 0 ? {} : { use },
+          ...previous,
+          output: file || previous?.output || await output(id)
+        }, silent);
+      }
+      for (const result2 of results) tools.delete(result2.tool_use_id);
+      for (const text2 of texts(entry)) {
+        const notice = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/.exec(text2)?.[1];
+        if (notice === void 0) continue;
+        const task = tasks.get(tag(notice, "task-id"));
+        const status = ended[tag(notice, "status")];
+        if (task === void 0 || status === void 0) continue;
+        const file = tag(notice, "output-file");
+        const exit = /exit code (-?\d+)/.exec(tag(notice, "summary"))?.[1];
+        keep({ ...task, status, ended: task.ended ?? at(entry), ...file === "" ? {} : { output: file }, ...exit === void 0 ? {} : { exit: Number(exit) } }, silent);
+      }
+    },
+    async poll(silent = false) {
+      for (const task of tasks.values()) {
+        if (task.status !== "running" || task.kind === "local_agent") continue;
+        const file = await open3(task.output, "r").catch(() => void 0);
+        if (file === void 0) continue;
+        try {
+          const { size, mtimeMs } = await file.stat();
+          const length = Math.min(512, size);
+          const { buffer, bytesRead } = await file.read(Buffer.alloc(length), 0, length, size - length);
+          const exit = /(?:^|\n)\[exited with code (-?\d+)\]\s*$/.exec(buffer.subarray(0, bytesRead).toString("utf8"))?.[1];
+          if (exit !== void 0) keep({ ...task, status: Number(exit) === 0 ? "completed" : "failed", ended: mtimeMs, exit: Number(exit) }, silent);
+        } catch {
+        } finally {
+          await file.close();
+        }
+      }
+    },
+    stopped(silent = false) {
+      tools.clear();
+      for (const task of tasks.values()) {
+        if (task.status === "running") keep({ ...task, status: "stopped", ended: Date.now() }, silent);
+      }
+    },
+    publish() {
+      for (const task of tasks.values()) changed(task);
+    }
+  };
+}
+
 // src/provider.mjs
 var typingDelay = () => 15 + Math.floor(Math.random() * 31);
-var object3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
-var string7 = (value) => typeof value === "string" ? value : "";
+var object4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+var string8 = (value) => typeof value === "string" ? value : "";
 var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 var terminalArgs = (options, config) => [
   "--permission-mode",
   options.mode,
   "--settings",
-  JSON.stringify({ claudeMdExcludes: [join4(config, "GECKIT.md")] }),
+  JSON.stringify({ claudeMdExcludes: [join5(config, "GECKIT.md")] }),
   ...options.model === void 0 ? [] : ["--model", options.model],
   ...options.resume ? ["--resume", options.id] : ["--session-id", options.id],
   ...options.resume || options.fork === void 0 ? [] : ["--fork-session", "--resume", options.fork.from, ...options.fork.at === void 0 ? [] : ["--resume-session-at", options.fork.at]]
@@ -1672,10 +1774,10 @@ function terminalScreen(text2) {
   if (selected !== -1 && /Enter to (?:select|confirm)|Esc to (?:cancel|go back)|↑.*↓|up.*down.*select/i.test(lines.slice(selected + 1).join("\n"))) {
     const choice = /^\s*(?:[❯›>]\s*)?(\d+)[.)]\s+(.+)$/;
     const groups = [];
-    for (const [at, line] of lines.entries()) {
+    for (const [at2, line] of lines.entries()) {
       const match = choice.exec(line);
       if (match === null) continue;
-      const option = { at, number: Number(match[1]), label: match[2].trim() };
+      const option = { at: at2, number: Number(match[1]), label: match[2].trim() };
       if (option.number !== (groups.at(-1)?.at(-1)?.number ?? 0) + 1) groups.push([]);
       if (groups.length === 0) groups.push([]);
       groups.at(-1).push(option);
@@ -1714,7 +1816,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   let offset = 0;
   let remainder = Buffer.alloc(0);
   let running = false;
-  let ended = false;
+  let ended2 = false;
   let turn = false;
   let stopping = false;
   let activity = false;
@@ -1731,13 +1833,14 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   let imagesDirectory;
   let submitting = false;
   const emit = (items = [], gone = [], signals = []) => {
-    if (ended) return;
+    if (ended2) return;
     for (const signal of signals) {
       if (signal.kind === "begun") log("info", "session.turn.begun", { session: options.id });
       if (signal.kind === "ended") log(signal.how === "failed" ? "warn" : "info", "session.turn.ended", { session: options.id, outcome: signal.how });
     }
     hear({ items, gone, signals });
   };
+  const tasks = backgroundTasks(options.root, options.id, environment(), (task) => emit([], [], [{ kind: "task", task }]));
   const read2 = async () => {
     const path = await claudeFile2(options.root, options.id);
     if (path === void 0) return;
@@ -1747,7 +1850,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       remainder = Buffer.alloc(0);
     }
     if (size === offset) return;
-    const file = await open3(path, "r");
+    const file = await open4(path, "r");
     let bytes;
     try {
       bytes = Buffer.alloc(size - offset);
@@ -1771,10 +1874,11 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       } catch {
         continue;
       }
+      await tasks.read(entry);
       if (entry["isSidechain"] === true) continue;
       if (entry["type"] === "system" && entry["subtype"] === "local_command" && entry["commandRun"] !== void 0) activity = true;
       if (entry["isMeta"] === true) continue;
-      const type = string7(entry["type"]);
+      const type = string8(entry["type"]);
       if (type === "cost-state") {
         const cost = entry["totalCostUSD"];
         if (typeof cost === "number") emit([], [], [{ kind: "spend", cost }]);
@@ -1782,14 +1886,14 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       }
       if (type !== "assistant" && type !== "user" && type !== "system" && type !== "rate_limit_event") continue;
       const parsed = readClaude2(state, type === "user" ? { ...entry, tool_use_result: entry["toolUseResult"] } : entry);
-      const model = type === "assistant" ? string7(object3(entry["message"])["model"]) : "";
+      const model = type === "assistant" ? string8(object4(entry["message"])["model"]) : "";
       if (type === "assistant" && parsed.items.length > 0) activity = true;
       if (!turn && parsed.items.some((item) => item.kind === "theirs")) {
         turn = true;
         emit([], [], [{ kind: "begun" }]);
       }
       if (type === "assistant" && entry["isApiErrorMessage"] === true) {
-        failure = string7(object3(entry["message"])["content"]?.find?.((part) => part.type === "text")?.text) || "Claude Code API request failed.";
+        failure = string8(object4(entry["message"])["content"]?.find?.((part) => part.type === "text")?.text) || "Claude Code API request failed.";
         activity = true;
       } else if (model !== "" && model !== "<synthetic>") failure = "";
       emit(parsed.items, parsed.gone, [...parsed.signals.filter((signal) => signal.kind !== "ended" && signal.kind !== "asks"), ...model === "" || model === "<synthetic>" ? [] : [{ kind: "model", model }]]);
@@ -1803,11 +1907,11 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   const imagesIn = async (images) => {
     if (images.length === 0) return [];
-    imagesDirectory ??= await mkdtemp(join4(tmpdir(), "claude-images-"));
+    imagesDirectory ??= await mkdtemp(join5(tmpdir(), "claude-images-"));
     const extensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp" };
     const paths = [];
     for (const image of images) {
-      const path = join4(imagesDirectory, `${randomUUID()}${extensions[image.media] ?? ".img"}`);
+      const path = join5(imagesDirectory, `${randomUUID()}${extensions[image.media] ?? ".img"}`);
       await writeFile(path, Buffer.from(image.data, "base64"), { mode: 384, flag: "wx" });
       paths.push(path);
     }
@@ -1836,9 +1940,9 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     trustHandled = true;
   };
   const inspect = async () => {
-    if (!running || ended || answering || submitting) return;
+    if (!running || ended2 || answering || submitting) return;
     const text2 = await tmux(["capture-pane", "-p", "-t", name]);
-    if (ended) return;
+    if (ended2) return;
     const screen = terminalScreen(text2);
     if (screen.trust && !trustHandled) {
       await confirmTrust(screen);
@@ -1879,9 +1983,10 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     reading = reading.then(async () => {
       if (++polls % 4 === 0 && !await alive()) throw new Error("Claude Code exited.");
       await read2();
+      await tasks.poll();
       await inspect();
     }).catch(async () => {
-      if (!running || ended) return;
+      if (!running || ended2) return;
       if (await alive()) return;
       if (turn) emit([], [], [{ kind: "ended", how: "failed", text: "Claude Code exited." }]);
       void close();
@@ -1889,15 +1994,36 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     return reading;
   };
   const start = async () => {
-    if (ended) return;
+    if (ended2) return;
     const path = await claudeFile2(options.root, options.id);
-    if (path !== void 0) offset = (await stat3(path)).size;
+    if (path !== void 0) {
+      offset = (await stat3(path)).size;
+      if (offset > 0) {
+        const lines = createInterface4({ input: createReadStream(path, { end: offset - 1 }), crlfDelay: Infinity });
+        try {
+          for await (const line of lines) {
+            let entry;
+            try {
+              entry = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            await tasks.read(entry, true);
+          }
+        } finally {
+          lines.close();
+        }
+        await tasks.poll(true);
+        tasks.stopped(true);
+        tasks.publish();
+      }
+    }
     const env = environment();
     const omitted = [...OFF_PLAN2, ...Object.keys(planOnly2()).filter((key) => key.startsWith("GECKIT_"))];
-    const config = env.CLAUDE_CONFIG_DIR ?? join4(homedir5(), ".claude");
+    const config = env.CLAUDE_CONFIG_DIR ?? join5(homedir5(), ".claude");
     const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand2(env), ...terminalArgs(options, config)].map(quote).join(" ");
     await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "50", "-c", options.root, launch]);
-    if (ended) {
+    if (ended2) {
       await tmux(["kill-session", "-t", name]).catch(() => void 0);
       return;
     }
@@ -1909,7 +2035,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   const waitForPrompt = async () => {
     for (let attempt = 0; attempt < 600; attempt += 1) {
-      if (ended) throw new Error("Claude Code session ended before input was ready.");
+      if (ended2) throw new Error("Claude Code session ended before input was ready.");
       const screen = terminalScreen(await tmux(["capture-pane", "-p", "-t", name]));
       if (screen.trust && !trustHandled) await confirmTrust(screen);
       else if (screen.kind === "idle") return;
@@ -1932,8 +2058,9 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     await tmux(["send-keys", "-t", name, "Enter"]);
   };
   const close = async () => {
-    if (ended) return;
-    ended = true;
+    if (ended2) return;
+    tasks.stopped();
+    ended2 = true;
     running = false;
     clearInterval(poll);
     await starting?.catch(() => void 0);
@@ -1945,12 +2072,12 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   return {
     async inject(text2, images = [], before = []) {
-      if (ended || !running || !turn || stopping) throw new Error("Claude Code is no longer working. Your message is still queued.");
+      if (ended2 || !running || !turn || stopping) throw new Error("Claude Code is no longer working. Your message is still queued.");
       if (submitting || answering || pending !== void 0) throw new Error("Answer Claude Code's question before sending this message.");
       submitting = true;
       let typed2 = false;
       const ready = async () => {
-        if (ended || stopping || !turn || !await alive()) throw new Error("Claude Code is no longer working. Your message is still queued.");
+        if (ended2 || stopping || !turn || !await alive()) throw new Error("Claude Code is no longer working. Your message is still queued.");
         const screen = terminalScreen(await tmux(["capture-pane", "-p", "-t", name]));
         if (screen.kind !== "working") throw new Error(screen.kind === "question" ? "Answer Claude Code's question before sending this message." : "Claude Code is not ready to receive this message. Your message is still queued.");
       };
@@ -1964,7 +2091,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
         sent("inject");
         idle = 0;
       } catch (error) {
-        if (typed2 && !ended) {
+        if (typed2 && !ended2) {
           const screen = terminalScreen(await tmux(["capture-pane", "-p", "-t", name]).catch(() => ""));
           if (screen.kind === "working" || screen.kind === "idle") await tmux(["send-keys", "-t", name, "C-u"]).catch(() => void 0);
         }
@@ -1974,7 +2101,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       }
     },
     send(text2, images = [], before = []) {
-      if (ended) return;
+      if (ended2) return;
       submitting = true;
       turn = true;
       emit([], [], [{ kind: "begun" }]);
@@ -2000,7 +2127,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       });
     },
     answer(id, answer) {
-      if (pending?.id !== id || answering || ended) return;
+      if (pending?.id !== id || answering || ended2) return;
       answering = true;
       const current = pending;
       void (async () => {
@@ -2024,7 +2151,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
         const distance = index - screen.focus;
         if (distance !== 0) await tmux(["send-keys", "-t", name, ...Array.from({ length: Math.abs(distance) }, () => distance < 0 ? "Up" : "Down")]);
         await tmux(["send-keys", "-t", name, "Enter"]);
-        if (typed2 !== void 0) await keys(string7(typed2));
+        if (typed2 !== void 0) await keys(string8(typed2));
         pending = void 0;
         idle = 0;
       })().catch((error) => {
@@ -2035,7 +2162,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       });
     },
     stop() {
-      if (ended) return;
+      if (ended2) return;
       stopping = true;
       resolveQuestion();
       void tmux(["send-keys", "-t", name, "C-c"]).catch(() => void 0);
@@ -2051,17 +2178,17 @@ function resetTime(line, now) {
   if (match === null) return void 0;
   const [, month, day, hour, minute, half] = match;
   const today = new Date(now);
-  const at = new Date(today.getFullYear(), month === void 0 ? today.getMonth() : MONTHS.indexOf(month.toLowerCase()), month === void 0 ? today.getDate() : Number(day), Number(hour) % 12 + (half.toLowerCase() === "pm" ? 12 : 0), Number(minute ?? 0));
-  if (month === void 0 && at.getTime() <= now) at.setDate(at.getDate() + 1);
-  if (month !== void 0 && at.getTime() < now - 24 * HOUR) at.setFullYear(at.getFullYear() + 1);
-  return at.getTime();
+  const at2 = new Date(today.getFullYear(), month === void 0 ? today.getMonth() : MONTHS.indexOf(month.toLowerCase()), month === void 0 ? today.getDate() : Number(day), Number(hour) % 12 + (half.toLowerCase() === "pm" ? 12 : 0), Number(minute ?? 0));
+  if (month === void 0 && at2.getTime() <= now) at2.setDate(at2.getDate() + 1);
+  if (month !== void 0 && at2.getTime() < now - 24 * HOUR) at2.setFullYear(at2.getFullYear() + 1);
+  return at2.getTime();
 }
 function usageScreen(text2, now = Date.now()) {
   const lines = plain2(text2).split("\n").map((line) => line.trim());
   const window = (title) => {
-    const at = lines.indexOf(title);
-    if (at === -1) return void 0;
-    const near = lines.slice(at + 1, at + 4);
+    const at2 = lines.indexOf(title);
+    if (at2 === -1) return void 0;
+    const near = lines.slice(at2 + 1, at2 + 4);
     const used = near.map((line) => /(\d+(?:\.\d+)?)% used/.exec(line)).find((found) => found !== null);
     const resetsAt = near.map((line) => resetTime(line, now)).find((found) => found !== void 0);
     return used === void 0 || resetsAt === void 0 ? void 0 : { part: Number(used[1]) / 100, resetsAt };
@@ -2080,7 +2207,7 @@ function planNow(plan2, now) {
   }
   return shown2;
 }
-function usageReader(runtime, { name = "geckit-claude-usage", folder = join4(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
+function usageReader(runtime, { name = "geckit-claude-usage", folder = join5(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
 } } = {}) {
   const { claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2 } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly2()).filter(([key]) => !key.startsWith("GECKIT_")));
@@ -2221,10 +2348,10 @@ function create(context = {}) {
     search: (roots, asked) => searchClaude(roots, asked),
     hidden: (from, to, include) => everyClaude(from, to, include),
     create: async () => randomUUID(),
-    fork: async (root, id, at) => {
-      const point = await forkPoint(root, id, at).catch(() => void 0);
+    fork: async (root, id, at2) => {
+      const point = await forkPoint(root, id, at2).catch(() => void 0);
       const items = (await readClaudeSession(root, id).catch(() => void 0))?.items ?? [];
-      const upTo = items.findLastIndex((item) => "at" in item && item.at !== void 0 && item.at <= at);
+      const upTo = items.findLastIndex((item) => "at" in item && item.at !== void 0 && item.at <= at2);
       return { id: randomUUID(), fork: { from: id, ...point === void 0 ? {} : { at: point } }, begun: false, items: items.slice(0, upTo + 1) };
     },
     has: async (root, id) => await claudeFile(root, id) !== void 0,
