@@ -128,3 +128,65 @@ test('ends tasks whose notice was absorbed mid-turn and reads the saved output p
     assert.equal(updates.at(-1).exit, 0)
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
+
+test('ends a task from its successful TaskStop result without a notification or exit marker', async () => {
+  const updates = []
+  const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
+  await tracker.read(use())
+  await tracker.read(result({ backgroundTaskId: 'bint88s11' }))
+  const stop = { ...use('TaskStop', 'stop'), message: { content: [{ type: 'tool_use', id: 'stop', name: 'TaskStop', input: { task_id: 'bint88s11' } }] } }
+  await tracker.read(stop)
+  assert.equal(updates.length, 1, 'a request is not proof of a successful stop')
+  const stopped = result({ message: 'Successfully stopped task: bint88s11 (python3 -m http.server)', task_id: 'bint88s11', task_type: 'local_bash' }, 'stop')
+  await tracker.read(stopped)
+  assert.equal(updates.at(-1).status, 'stopped')
+  assert.equal(updates.at(-1).ended, Date.parse(timestamp))
+  assert.equal(updates.at(-1).exit, undefined)
+  await tracker.read(stop)
+  await tracker.read(stopped)
+  assert.equal(updates.length, 2, 'duplicate stop results do not re-emit the task')
+})
+
+test('ignores failed, mismatched and unrelated stop results', async () => {
+  const updates = []
+  const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
+  await tracker.read(result({ backgroundTaskId: 'running' }))
+  const stop = { type: 'assistant', timestamp, message: { content: [{ type: 'tool_use', id: 'stop', name: 'TaskStop', input: { task_id: 'running' } }] } }
+  const data = { message: 'Successfully stopped task: running', task_id: 'running' }
+  await tracker.read(result(data, 'unrelated'))
+  await tracker.read(stop)
+  const failed = result(data, 'stop')
+  failed.message.content[0].is_error = true
+  await tracker.read(failed)
+  await tracker.read(stop)
+  await tracker.read(result({ ...data, task_id: 'other' }, 'stop'))
+  await tracker.read(stop)
+  await tracker.read(result({ task_id: 'running', message: 'No such task' }, 'stop'))
+  assert.equal(updates.length, 1)
+  assert.equal(updates[0].status, 'running')
+})
+
+test('recognizes only a final killed marker and preserves the final state', async () => {
+  const folder = await mkdtemp('/private/tmp/claude-killed-task-')
+  const outputFile = join(folder, 'killed.output')
+  const updates = []
+  const tracker = backgroundTasks(folder, 'session', {}, (task) => updates.push(task))
+  try {
+    await tracker.read(result({ backgroundTaskId: 'killed', outputFile }))
+    await writeFile(outputFile, 'example [killed]\n')
+    await tracker.poll()
+    await writeFile(outputFile, '[killed]\nstill running\n')
+    await tracker.poll()
+    assert.equal(updates.length, 1)
+    await writeFile(outputFile, 'server request\n\n[killed]\n')
+    await tracker.poll()
+    assert.equal(updates.at(-1).status, 'stopped')
+    assert.equal(updates.at(-1).exit, undefined)
+    const endedAt = updates.at(-1).ended
+    await tracker.poll()
+    await tracker.read({ type: 'assistant', timestamp, message: { content: [{ type: 'tool_use', id: 'stop', name: 'TaskStop', input: { task_id: 'killed' } }] } })
+    await tracker.read(result({ task_id: 'killed', message: 'Successfully stopped task: killed' }, 'stop'))
+    assert.equal(updates.length, 2)
+    assert.equal(updates.at(-1).ended, endedAt)
+  } finally { await rm(folder, { recursive: true, force: true }) }
+})

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -63,6 +63,15 @@ test('reports background work after a partial saved result and tracks it after t
     assert.equal(log.some((entry) => entry.stopped || entry.escaped), false)
     driver.send('background')
     await until(() => ended().length === 2)
+    const stoppedAt = '2026-10-12T17:55:21.449Z'
+    await appendFile(file, [
+      { type: 'assistant', timestamp: stoppedAt, message: { content: [{ type: 'tool_use', id: 'stop-use', name: 'TaskStop', input: { task_id: 'shell-two' } }] } },
+      { type: 'user', timestamp: stoppedAt, toolUseResult: { message: 'Successfully stopped task: shell-two (tail -f copy.log)', task_id: 'shell-two', task_type: 'local_bash' }, message: { content: [{ type: 'tool_result', tool_use_id: 'stop-use', content: '{}' }] } },
+    ].map((entry) => JSON.stringify(entry)).join('\n') + '\n')
+    await until(() => tasks().some((task) => task.id === 'shell-two' && task.status === 'stopped'))
+    assert.equal(tasks().at(-1).ended, Date.parse(stoppedAt))
+    assert.equal(ended().length, 2, 'TaskStop does not change the foreground turn')
+    assert.equal(closed, false, 'TaskStop does not close the owning conversation')
     await driver.end()
     assert.equal(closed, true)
     assert.equal(tasks().findLast((task) => task.id === 'shell-two').status, 'stopped')

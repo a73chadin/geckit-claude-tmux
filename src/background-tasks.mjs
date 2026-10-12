@@ -53,6 +53,13 @@ export function backgroundTasks(root, session, env, changed) {
       const results = blocks(entry).filter((block) => block.type === 'tool_result')
       const use = results[0]?.tool_use_id
       const started = tools.get(use)
+      if (started?.tool === 'TaskStop' && results[0]?.is_error !== true) {
+        const task = tasks.get(string(result.task_id))
+        const stopped = /^Successfully stopped task: ([A-Za-z0-9_-]+)(?: \(|$)/.exec(string(result.message))?.[1]
+        if (task?.status === 'running' && task.id === started.input.task_id && task.id === stopped) {
+          keep({ ...task, status: 'stopped', ended: at(entry) }, silent)
+        }
+      }
       const id = string(result.backgroundTaskId) || (result.isAsync === true ? string(result.agentId) : '')
       if (/^[A-Za-z0-9_-]+$/.test(id)) {
         const previous = tasks.get(id)
@@ -80,8 +87,9 @@ export function backgroundTasks(root, session, env, changed) {
           const { size, mtimeMs } = await file.stat()
           const length = Math.min(512, size)
           const { buffer, bytesRead } = await file.read(Buffer.alloc(length), 0, length, size - length)
-          const exit = /(?:^|\n)\[exited with code (-?\d+)\]\s*$/.exec(buffer.subarray(0, bytesRead).toString('utf8'))?.[1]
-          if (exit !== undefined) keep({ ...task, status: Number(exit) === 0 ? 'completed' : 'failed', ended: mtimeMs, exit: Number(exit) }, silent)
+          const marker = /(?:^|\n)\[(?:exited with code (-?\d+)|(killed))\]\s*$/.exec(buffer.subarray(0, bytesRead).toString('utf8'))
+          if (marker?.[2] === 'killed') keep({ ...task, status: 'stopped', ended: mtimeMs }, silent)
+          else if (marker?.[1] !== undefined) keep({ ...task, status: Number(marker[1]) === 0 ? 'completed' : 'failed', ended: mtimeMs, exit: Number(marker[1]) }, silent)
         } catch {} finally {
           await file.close()
         }
