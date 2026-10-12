@@ -113,3 +113,18 @@ test('ignores sidechains, foreground helpers and invalid task IDs', async () => 
   await tracker.read(notice('unknown', 'completed'))
   assert.equal(updates.length, 0)
 })
+
+test('ends tasks whose notice was absorbed mid-turn and reads the saved output path without its full stop', async () => {
+  const folder = await mkdtemp('/private/tmp/claude-absorbed-task-')
+  const file = join(folder, 'b15tpggyl.output')
+  const updates = []
+  const tracker = backgroundTasks(folder, 'session', {}, (task) => updates.push(task))
+  try {
+    await tracker.read(use())
+    await tracker.read({ type: 'user', timestamp, toolUseResult: { backgroundTaskId: 'b15tpggyl' }, message: { content: [{ type: 'tool_result', tool_use_id: 'use', content: `Command running in background with ID: b15tpggyl. Output is being written to: ${file}. You will be notified when it completes.` }] } })
+    assert.equal(updates.at(-1).output, file)
+    await tracker.read({ type: 'attachment', timestamp, attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: '<task-notification>\n<task-id>b15tpggyl</task-id>\n<status>completed</status>\n<summary>Background command "Wait" completed (exit code 0)</summary>\n</task-notification>' } })
+    assert.equal(updates.at(-1).status, 'completed')
+    assert.equal(updates.at(-1).exit, 0)
+  } finally { await rm(folder, { recursive: true, force: true }) }
+})

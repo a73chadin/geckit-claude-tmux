@@ -175,7 +175,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
   };
   const resolveQuestion = () => {
     if (pending === void 0) return;
-    emit([], [], [{ kind: "resolved", ask: pending.id }]);
+    emit([], [`card:${pending.id}`], [{ kind: "resolved", ask: pending.id }]);
     pending = void 0;
   };
   const ask = (screen) => {

@@ -1679,6 +1679,16 @@ function backgroundTasks(root, session, env, changed) {
     tasks.set(task.id, task);
     if (!silent) changed(task);
   };
+  const told = (entry, text2, silent) => {
+    const notice = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/.exec(text2)?.[1];
+    if (notice === void 0) return;
+    const task = tasks.get(tag(notice, "task-id"));
+    const status = ended[tag(notice, "status")];
+    if (task === void 0 || status === void 0) return;
+    const file = tag(notice, "output-file");
+    const exit = /exit code (-?\d+)/.exec(tag(notice, "summary"))?.[1];
+    keep({ ...task, status, ended: task.ended ?? at(entry), ...file === "" ? {} : { output: file }, ...exit === void 0 ? {} : { exit: Number(exit) } }, silent);
+  };
   return {
     async read(entry, silent = false) {
       if (entry.isSidechain === true) return;
@@ -1688,6 +1698,7 @@ function backgroundTasks(root, session, env, changed) {
         }
         return;
       }
+      if (entry.type === "attachment" && object3(entry.attachment).type === "queued_command") return told(entry, string7(object3(entry.attachment).prompt), silent);
       if (entry.type !== "user") return;
       const result = object3(entry.toolUseResult ?? entry.tool_use_result);
       const results = blocks(entry).filter((block) => block.type === "tool_result");
@@ -1697,7 +1708,7 @@ function backgroundTasks(root, session, env, changed) {
       if (/^[A-Za-z0-9_-]+$/.test(id)) {
         const previous = tasks.get(id);
         const body = results.map((block) => typeof block.content === "string" ? block.content : "").join("\n");
-        const file = string7(result.outputFile) || /(?:Output is being written to|output_file): (\S+?)(?:\s|$)/.exec(body)?.[1];
+        const file = string7(result.outputFile) || /(?:Output is being written to|output_file): (\S+?)\.?(?:\s|$)/.exec(body)?.[1];
         keep({
           id,
           kind: started?.tool === "Agent" || result.isAsync === true ? "local_agent" : started?.tool === "Monitor" ? "monitor" : "local_bash",
@@ -1711,16 +1722,7 @@ function backgroundTasks(root, session, env, changed) {
         }, silent);
       }
       for (const result2 of results) tools.delete(result2.tool_use_id);
-      for (const text2 of texts(entry)) {
-        const notice = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/.exec(text2)?.[1];
-        if (notice === void 0) continue;
-        const task = tasks.get(tag(notice, "task-id"));
-        const status = ended[tag(notice, "status")];
-        if (task === void 0 || status === void 0) continue;
-        const file = tag(notice, "output-file");
-        const exit = /exit code (-?\d+)/.exec(tag(notice, "summary"))?.[1];
-        keep({ ...task, status, ended: task.ended ?? at(entry), ...file === "" ? {} : { output: file }, ...exit === void 0 ? {} : { exit: Number(exit) } }, silent);
-      }
+      for (const text2 of texts(entry)) told(entry, text2, silent);
     },
     async poll(silent = false) {
       for (const task of tasks.values()) {
@@ -1919,7 +1921,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   const resolveQuestion = () => {
     if (pending === void 0) return;
-    emit([], [], [{ kind: "resolved", ask: pending.id }]);
+    emit([], [`card:${pending.id}`], [{ kind: "resolved", ask: pending.id }]);
     pending = void 0;
   };
   const ask = (screen) => {

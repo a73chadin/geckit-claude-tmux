@@ -27,6 +27,16 @@ export function backgroundTasks(root, session, env, changed) {
     tasks.set(task.id, task)
     if (!silent) changed(task)
   }
+  const told = (entry, text, silent) => {
+    const notice = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/.exec(text)?.[1]
+    if (notice === undefined) return
+    const task = tasks.get(tag(notice, 'task-id'))
+    const status = ended[tag(notice, 'status')]
+    if (task === undefined || status === undefined) return
+    const file = tag(notice, 'output-file')
+    const exit = /exit code (-?\d+)/.exec(tag(notice, 'summary'))?.[1]
+    keep({ ...task, status, ended: task.ended ?? at(entry), ...(file === '' ? {} : { output: file }), ...(exit === undefined ? {} : { exit: Number(exit) }) }, silent)
+  }
   return {
     async read(entry, silent = false) {
       if (entry.isSidechain === true) return
@@ -36,6 +46,8 @@ export function backgroundTasks(root, session, env, changed) {
         }
         return
       }
+      // A notice that arrives while Claude is working is absorbed into the turn and saved as an attachment.
+      if (entry.type === 'attachment' && object(entry.attachment).type === 'queued_command') return told(entry, string(object(entry.attachment).prompt), silent)
       if (entry.type !== 'user') return
       const result = object(entry.toolUseResult ?? entry.tool_use_result)
       const results = blocks(entry).filter((block) => block.type === 'tool_result')
@@ -45,7 +57,7 @@ export function backgroundTasks(root, session, env, changed) {
       if (/^[A-Za-z0-9_-]+$/.test(id)) {
         const previous = tasks.get(id)
         const body = results.map((block) => typeof block.content === 'string' ? block.content : '').join('\n')
-        const file = string(result.outputFile) || /(?:Output is being written to|output_file): (\S+?)(?:\s|$)/.exec(body)?.[1]
+        const file = string(result.outputFile) || /(?:Output is being written to|output_file): (\S+?)\.?(?:\s|$)/.exec(body)?.[1]
         keep({
           id, kind: started?.tool === 'Agent' || result.isAsync === true ? 'local_agent' : started?.tool === 'Monitor' ? 'monitor' : 'local_bash',
           what: string(started?.input.description) || previous?.what || id,
@@ -57,16 +69,7 @@ export function backgroundTasks(root, session, env, changed) {
         }, silent)
       }
       for (const result of results) tools.delete(result.tool_use_id)
-      for (const text of texts(entry)) {
-        const notice = /^\s*<task-notification>([\s\S]*)<\/task-notification>\s*$/.exec(text)?.[1]
-        if (notice === undefined) continue
-        const task = tasks.get(tag(notice, 'task-id'))
-        const status = ended[tag(notice, 'status')]
-        if (task === undefined || status === undefined) continue
-        const file = tag(notice, 'output-file')
-        const exit = /exit code (-?\d+)/.exec(tag(notice, 'summary'))?.[1]
-        keep({ ...task, status, ended: task.ended ?? at(entry), ...(file === '' ? {} : { output: file }), ...(exit === undefined ? {} : { exit: Number(exit) }) }, silent)
-      }
+      for (const text of texts(entry)) told(entry, text, silent)
     },
     async poll(silent = false) {
       for (const task of tasks.values()) {

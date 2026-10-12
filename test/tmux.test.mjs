@@ -212,6 +212,13 @@ test('injects text and images into active work without interruption', { skip: !a
     driver.answer(ask.ask, 'No')
     await until(() => signals().filter((entry) => entry.kind === 'ended').length === 2)
     assert.equal(sent, 3, 'question answers and rejected injections do not count')
+    assert.equal(events.some((event) => event.gone.includes(`card:${ask.ask}`)), false, 'a card answered here stays as answered')
+    driver.send('permission')
+    await until(() => signals().filter((entry) => entry.kind === 'asks').length === 2)
+    const elsewhere = signals().findLast((entry) => entry.kind === 'asks')
+    const pane = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}']).toString().split('\n').find((line) => line.startsWith(`claude-${id.slice(0, 8)}-`))
+    execFileSync('tmux', ['send-keys', '-t', pane, 'Enter'])
+    await until(() => events.some((event) => event.gone.includes(`card:${elsewhere.ask}`) && event.signals.some((entry) => entry.kind === 'resolved' && entry.ask === elsewhere.ask)))
   } finally {
     await driver.end()
     await rm(folder, { recursive: true, force: true })
