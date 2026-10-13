@@ -38,6 +38,56 @@ test('recognizes native states without interpreting reply text as a selection', 
   assert.deepEqual(native.options.map((one) => one.label), ['Red', 'Blue', 'Type something.', 'Chat about this'])
   assert.equal(terminalScreen('Quick safety check:\nIs this a project you created or one you trust?\nEnter to confirm').trust, true)
 })
+test('recognizes answer review without a navigation footer', async () => {
+  const review = await readFile(new URL('./answer-review.txt', import.meta.url), 'utf8')
+  const screen = terminalScreen(review)
+  assert.equal(screen.kind, 'question')
+  assert.equal(screen.focus, 0)
+  assert.deepEqual(screen.options.map((one) => one.label), ['Submit answers', 'Cancel'])
+  assert(screen.title.includes('Local demo (Recommended)'))
+  assert(screen.title.includes('Yes, edit both'))
+  assert.equal(terminalScreen(review.replace('❯ 1.', '  1.').replace('  2. Cancel', '❯ 2. Cancel')).focus, 1)
+  assert.equal(terminalScreen(review + '\n' + idle).kind, 'idle')
+  assert.equal(terminalScreen('Example:\n❯ 1. Submit answers\n  2. Cancel\n').kind, 'unknown')
+})
+
+test('submits or cancels native answer review through tmux', { skip: !available, timeout: 15000 }, async () => {
+  const folder = await realpath(await mkdtemp(join(tmpdir(), 'claude-review-test-')))
+  const id = randomUUID()
+  const binary = join(dirname(fileURLToPath(import.meta.url)), 'fake-claude.mjs')
+  await chmod(binary, 0o755)
+  const events = []
+  const runtime = {
+    claudeCommand: () => binary, OFF_PLAN: [],
+    planOnly: () => ({ ...process.env, CLAUDE_CONFIG_DIR: folder }),
+    claudeState: () => ({}), claudeFile: async () => undefined,
+  }
+  const driver = holdTmux(runtime, { id, root: folder, mode: 'manual' }, (event) => events.push(event), () => {})
+  const signals = () => events.flatMap((event) => event.signals)
+  const asks = () => signals().filter((signal) => signal.kind === 'asks')
+  const ended = () => signals().filter((signal) => signal.kind === 'ended')
+  const logs = async () => (await readFile(join(folder, id + '.log'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+  try {
+    for (const [index, choice] of ['Submit answers', 'Cancel'].entries()) {
+      driver.send('review')
+      await until(() => asks().length === index + 1)
+      const ask = asks().at(-1)
+      assert.deepEqual(ask.wanted.choices, ['Submit answers', 'Cancel'])
+      assert(ask.wanted.question.includes('Yes, edit both'))
+      await delay(600)
+      assert.equal((await logs()).filter((line) => line.choice).length, index, 'review waits for an explicit choice')
+      await assert.rejects(driver.inject('continue'), /question/)
+      driver.answer(ask.ask, choice)
+      await until(() => ended().length === index + 1)
+      assert.equal(ended().at(-1).how, 'done')
+      assert.equal((await logs()).filter((line) => line.choice).at(-1).choice, choice)
+    }
+  } finally {
+    await driver.end()
+    await rm(folder, { recursive: true, force: true })
+  }
+})
+
 test('reads the plan windows from the /usage screen', () => {
   const now = new Date(2026, 9, 9, 10, 0).getTime()
   const plan = usageScreen('Current session\n████   4% used\nResets 1:40pm (Europe/Samara)\n\nCurrent week (all models)\n██  61% used\nResets Oct 14, 9am (Europe/Samara)\n', now)

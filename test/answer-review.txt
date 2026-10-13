@@ -1,0 +1,15 @@
+Previous assistant reply
+────────────────────────────────────────
+←  ☒ Scope  ☒ Files  ✔ Submit  →
+
+Review your answers
+
+ ● Where do you want to see the demo first?
+   → Local demo (Recommended)
+ │ ● This needs a small change in two files. OK to edit both?
+   → Yes, edit both
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel

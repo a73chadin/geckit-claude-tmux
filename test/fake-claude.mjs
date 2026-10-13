@@ -29,7 +29,7 @@ const trustScreen = () => paint(`Quick safety check:\nIs this a project you crea
 const paint = (text) => process.stdout.write('\x1b[2J\x1b[H' + text)
 const idle = () => { busy = false; paint('Claude Code\n────────────────────\n❯\u00a0Try "ask anything"\n────────────────────\n  auto mode on\n') }
 const working = () => { busy = true; paint('Claude Code\n✶ Working…\n────────────────────\n❯\u00a0\n────────────────────\n') }
-const choices = () => paint(`${menu.title}\n${menu.options.map((label, i) => `${i === selection ? '❯' : ' '} ${i + 1}. ${label}`).join('\n')}\n  Enter to select · Esc to cancel\n`)
+const choices = () => paint(`${menu.title}\n${menu.options.map((label, i) => `${i === selection ? '❯' : ' '} ${i + 1}. ${label}`).join('\n')}\n${menu.review ? '' : '  Enter to select · Esc to cancel\n'}`)
 const reply = (text) => {
   write({ type: 'assistant', uuid: 'reply-' + ++count, message: { model: 'claude-test', stop_reason: 'end_turn', content: [{ type: 'text', text }] } })
   idle()
@@ -64,6 +64,11 @@ const say = (prompt) => {
     return
   }
   if (prompt === 'unknown') { paint('Unrecognized terminal state\n'); return }
+  if (prompt === 'review') {
+    menu = { title: '────────────────────\n← ☒ Scope ☒ Files ✔ Submit →\n\nReview your answers\n\n ● Where should the demo run?\n   → Local demo (Recommended)\n ● May we edit both files?\n   → Yes, edit both\n\nReady to submit your answers?\n', options: ['Submit answers', 'Cancel'], review: true }
+    selection = 0
+    choices(); return
+  }
   if (prompt.startsWith('permission') || prompt === 'question') {
     menu = prompt === 'question' ? { title: 'Which option?', options: ['A', 'B', 'Type something.'] } : { title: 'Run command?\nnpm test', options: ['Yes', 'Yes, allow for this session', 'No'] }
     selection = 0

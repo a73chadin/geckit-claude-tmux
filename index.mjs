@@ -1781,7 +1781,8 @@ function terminalScreen(text2) {
   const trust = /Quick safety check:\s*Is this a project you created or one you trust\?/i.test(lines.join("\n")) && /Enter to confirm/i.test(text2);
   const trustFocus = lines.some((line) => /^\s*[❯›>]\s*No, exit\s*$/.test(line)) ? 0 : lines.some((line) => /^\s*[❯›>]\s*Yes, I trust this folder\s*$/.test(line)) ? 1 : -1;
   const selected = lines.findLastIndex((line) => /^\s*[❯›>]\s*\d+[.)]\s+/.test(line));
-  if (selected !== -1 && /Enter to (?:select|confirm)|Esc to (?:cancel|go back)|↑.*↓|up.*down.*select/i.test(lines.slice(selected + 1).join("\n"))) {
+  const review = lines.some((line) => line.trim() === "Review your answers") && /(?:^|\n)\s*Ready to submit your answers\?\s*\n\s*(?:[❯›>]\s*)?1[.)]\s+Submit answers\s*\n\s*(?:[❯›>]\s*)?2[.)]\s+Cancel\s*$/.test(lines.join("\n"));
+  if (selected !== -1 && (review || /Enter to (?:select|confirm)|Esc to (?:cancel|go back)|↑.*↓|up.*down.*select/i.test(lines.slice(selected + 1).join("\n")))) {
     const choice = /^\s*(?:[❯›>]\s*)?(\d+)[.)]\s+(.+)$/;
     const groups = [];
     for (const [at2, line] of lines.entries()) {

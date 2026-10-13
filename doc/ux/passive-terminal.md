@@ -83,6 +83,7 @@ Question title and choices are Claude's native terminal text. Existing app label
 - Long-running tool or hook: retain Working while native busy indicators remain.
 - Fast answer: new transcript data provides turn activity even if no busy screen was sampled.
 - Stale question: recapture before answering; never select an option from an obsolete screen.
+- Answer review: Claude's "Review your answers" screen can end with "Ready to submit your answers?", "Submit answers" and "Cancel" without a navigation footer. Show its existing question card with the review and exact choices. Choosing Submit answers sends Enter to the selected native option; choosing Cancel returns to the native question flow. Neither action happens automatically. A quoted review in a reply followed by an idle prompt is not a question.
 - Native workspace trust: recognize the exact trust prompt, move to Yes, wait 700 ms for native input to settle, and recapture the screen to confirm Yes is visibly selected before pressing Enter. If startup ignores the navigation key, retry without submitting No, exit.
 - Images: preserve temporary image paths and remove files after completion/stop.
 - Existing GECKIT.md: exclude only that file per session if verified supported; do not edit shared global instructions.
@@ -113,6 +114,8 @@ Use tmux input, native terminal selection and passive JSONL reading. Remove HTTP
 - Unknown layouts stay working rather than reporting completion; native dialogs outside numbered menus require terminal interaction.
 
 ## 13. Rollout
+
+October 13 answer-review regression: the active Claude 2.1.296 pane stopped at a footerless Submit/Cancel menu. The old parser classified it as Unknown. A fixture reproduces the review layout, including selected answers, both focus positions and a quoted review followed by an idle prompt. Real tmux with fake Claude verifies that review waits for an explicit choice, rejects message injection while waiting, and sends Submit or Cancel to the native menu. The suite passes 19 of 20 tests; the existing ignored-trust-navigation assertion also fails on unchanged provider code. Syntax checks and the bundle build pass. No renderer components or styles changed. Browser inventory failed to load its request-header policy, and automatic Computer Use review denied GeckIt Local access; full-window light/dark and responsive question-card review remain unavailable.
 
 Install or update the library through Settings > Libraries. Apply update loads the new provider without restarting GeckIt; existing active turns finish with their current driver. Later sends adopt the replacement provider. The driver remains open for one hour after a completed turn, with new messages resetting the idle timer.
 
