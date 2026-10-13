@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import * as claude from "./claude-runtime.mjs";
 import { backgroundTasks } from "./background-tasks.mjs";
+import { findTmux, locateTmux } from "./tmux-binary.mjs";
 const typingDelay = () => 15 + Math.floor(Math.random() * 31);
 const object = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 const string = (value) => typeof value === "string" ? value : "";
@@ -58,13 +59,14 @@ function terminalScreen(text) {
 function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {}) {
   const { claudeCommand, OFF_PLAN, planOnly, claudeState, readClaude, claudeFile } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly()).filter(([key]) => !key.startsWith("GECKIT_")));
-  const tmux = (args, input) => new Promise((resolve, reject) => {
-    const child = execFile("tmux", [...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
+  const program = runtime.tmux ?? findTmux;
+  const tmux = (args, input) => program().then(({ file, server }) => new Promise((resolve, reject) => {
+    const child = execFile(file, [...server, ...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null) reject(new Error(stderr.trim() || error.message));
       else resolve(stdout.trim());
     });
     if (input !== void 0) child.stdin?.end(input);
-  });
+  }));
   if (process.platform === "win32" || options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local macOS and Linux projects.");
   const name = `claude-${options.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
   const alive = () => tmux(["display-message", "-p", "-t", name, "#{pane_dead}"]).then((dead) => dead !== "1", () => false);
@@ -447,12 +449,13 @@ function planNow(plan, now) {
 function usageReader(runtime, { name = "geckit-claude-usage", folder = join(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 60000, log = () => {} } = {}) {
   const { claudeCommand, OFF_PLAN, planOnly } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly()).filter(([key]) => !key.startsWith("GECKIT_")));
-  const tmux = (args) => new Promise((resolve, reject) => {
-    execFile("tmux", [...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
+  const program = runtime.tmux ?? findTmux;
+  const tmux = (args) => program().then(({ file, server }) => new Promise((resolve, reject) => {
+    execFile(file, [...server, ...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null) reject(new Error(stderr.trim() || error.message));
       else resolve(stdout.trim());
     });
-  });
+  }));
   const screen = () => tmux(["capture-pane", "-p", "-J", "-t", name]);
   let plan;
   let next = 0;
@@ -534,6 +537,7 @@ function create(context = {}) {
   const log = (level, event, fields) => { try { context.log?.write(level, event, fields); } catch {} };
   const usage = usageReader(claude, { log });
   log("info", "provider.created");
+  if (process.platform === "darwin" || process.platform === "linux") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
   let known = [];
   return {
     id: "claude-tmux", family: "claude", transport: "tmux",
@@ -587,4 +591,4 @@ function create(context = {}) {
     }, left, (delivery) => usage.sent(delivery), log)
   };
 }
-export { create, holdTmux, planNow, terminalScreen, usageReader, usageScreen };
+export { create, holdTmux, locateTmux, planNow, terminalScreen, usageReader, usageScreen };

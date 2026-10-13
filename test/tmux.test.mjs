@@ -170,6 +170,7 @@ test('failed checks wait for new messages and failed sends do not trigger retrie
     claudeCommand: () => 'unused', OFF_PLAN: [],
     planOnly: () => ({ ...process.env, PATH: folder }),
     claudeState: () => ({}), claudeFile: async () => undefined,
+    tmux: async () => ({ file: binary, server: [] }),
   }
   const logs = []
   const usage = usageReader(runtime, { folder, every: () => 0, log: (level, event, fields) => logs.push({ level, event, fields }) })

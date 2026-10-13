@@ -4,7 +4,13 @@ This plugin starts or resumes ordinary interactive Claude Code in tmux. Prompts 
 
 The plugin adds no HTTP hooks or GeckIt system instructions. It excludes the global `GECKIT.md` import for this process and does not install a GeckIt guide. User hooks, project instructions, authentication and native permission checks remain active. Existing instructions or resumed conversation history can still mention GeckIt; this is not a guarantee that Claude cannot infer automation.
 
-Install under Settings > Libraries using `https://github.com/anetrebskii/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and `tmux`, with a local macOS or Linux project.
+Install under Settings > Libraries using `https://github.com/anetrebskii/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and a local macOS or Linux project. Windows is not supported.
+
+## Finding tmux
+
+The plugin uses the first `tmux` that runs from the PATH GeckIt gives it, then from `/opt/homebrew/bin`, `/usr/local/bin`, `/opt/local/bin`, `/usr/bin`, Linuxbrew, nix and `~/.local/bin`, on its default server, so `tmux attach` reaches its sessions. Without one, it downloads its own copy for macOS (arm64, x86_64) or Linux (x86_64, arm64) from this repository's releases, checks it against the sha256 in `tmux-binaries.json`, keeps it in `~/Library/Caches/geckit-claude-tmux` or `~/.cache/geckit-claude-tmux`, and runs it on a server of its own, `-L geckit`, so a different tmux version already running is never touched. Attach to those sessions with that copy: `<copy> -L geckit attach`. If neither works, the conversation says how to install tmux.
+
+The copies are built by `scripts/build-tmux.sh`: tmux, libevent and on macOS utf8proc linked in, on Linux fully static against musl. Run the `tmux binaries` workflow by hand to publish a release and commit its hashes to `tmux-binaries.json`.
 
 ## Sending and reading
 

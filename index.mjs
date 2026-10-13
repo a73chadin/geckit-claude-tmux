@@ -5,13 +5,13 @@ var __export = (target, all) => {
 };
 
 // src/provider.mjs
-import { execFile as execFile2 } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { execFile as execFile3 } from "node:child_process";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createInterface as createInterface4 } from "node:readline";
 import { mkdir, mkdtemp, open as open4, rm as rm2, stat as stat3, writeFile } from "node:fs/promises";
-import { homedir as homedir5, tmpdir } from "node:os";
-import { join as join5 } from "node:path";
+import { homedir as homedir6, tmpdir } from "node:os";
+import { join as join6 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 // src/claude-runtime.mjs
@@ -1761,6 +1761,59 @@ function backgroundTasks(root, session, env, changed) {
   };
 }
 
+// src/tmux-binary.mjs
+import { execFile as execFile2 } from "node:child_process";
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import { mkdir as mkdirCache, readFile, rename, rm as rmPart, writeFile as writePart } from "node:fs/promises";
+import { homedir as homedir5 } from "node:os";
+import { delimiter as delimiter2, join as join5 } from "node:path";
+var KNOWN = () => ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/home/linuxbrew/.linuxbrew/bin", join5(homedir5(), ".nix-profile", "bin"), "/run/current-system/sw/bin", "/nix/var/nix/profiles/default/bin", join5(homedir5(), ".local", "bin")];
+var tmuxRuns = (file) => new Promise((resolve2) => {
+  execFile2(file, ["-V"], { timeout: 5e3, windowsHide: true }, (error) => resolve2(error === null));
+});
+var cacheFolder = (env) => process.platform === "darwin" ? join5(homedir5(), "Library", "Caches", "geckit-claude-tmux") : join5(env.XDG_CACHE_HOME || join5(homedir5(), ".cache"), "geckit-claude-tmux");
+var binaryList = () => readFile(new URL("./tmux-binaries.json", import.meta.url), "utf8").then(JSON.parse, () => ({ files: {} }));
+async function locateTmux({ env = process.env, folder = cacheFolder(env), binaries = binaryList, download = fetch, known = KNOWN() } = {}) {
+  if (process.platform !== "darwin" && process.platform !== "linux") throw new Error("Claude Code (tmux) runs on macOS and Linux only.");
+  const seen = /* @__PURE__ */ new Set();
+  for (const directory of [...(env.PATH ?? "").split(delimiter2), ...known]) {
+    if (directory === "" || seen.has(directory)) continue;
+    seen.add(directory);
+    const file2 = join5(directory, "tmux");
+    if (await tmuxRuns(file2)) return { file: file2, server: [] };
+  }
+  const install = `Install tmux (${process.platform === "darwin" ? "brew install tmux" : "for example sudo apt install tmux"}) and try again.`;
+  const { version, files } = await binaries();
+  const target = `${process.platform}-${process.arch}`;
+  const entry = files?.[target];
+  if (entry === void 0) throw new Error(`tmux is not installed. ${install}`);
+  const file = join5(folder, `tmux-${version}-${target}`);
+  if (!await tmuxRuns(file)) {
+    try {
+      const response = await download(entry.url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (createHash2("sha256").update(bytes).digest("hex") !== entry.sha256) throw new Error("checksum mismatch");
+      await mkdirCache(folder, { recursive: true });
+      const part = `${file}.${randomUUID()}.part`;
+      await writePart(part, bytes, { mode: 493 });
+      await rename(part, file).catch(async (error) => {
+        await rmPart(part, { force: true });
+        throw error;
+      });
+    } catch (error) {
+      throw new Error(`tmux is not installed and its copy could not be downloaded (${error.message}). ${install}`);
+    }
+    if (!await tmuxRuns(file)) throw new Error(`tmux is not installed and the downloaded copy does not run here. ${install}`);
+  }
+  return { file, server: ["-L", "geckit"] };
+}
+var located;
+var findTmux = () => located ??= locateTmux().catch((error) => {
+  located = void 0;
+  throw error;
+});
+
 // src/provider.mjs
 var typingDelay = () => 15 + Math.floor(Math.random() * 31);
 var object4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
@@ -1770,7 +1823,7 @@ var terminalArgs = (options, config) => [
   "--permission-mode",
   options.mode,
   "--settings",
-  JSON.stringify({ claudeMdExcludes: [join5(config, "GECKIT.md")] }),
+  JSON.stringify({ claudeMdExcludes: [join6(config, "GECKIT.md")] }),
   ...options.model === void 0 ? [] : ["--model", options.model],
   ...options.resume ? ["--resume", options.id] : ["--session-id", options.id],
   ...options.resume || options.fork === void 0 ? [] : ["--fork-session", "--resume", options.fork.from, ...options.fork.at === void 0 ? [] : ["--resume-session-at", options.fork.at]]
@@ -1813,15 +1866,16 @@ function holdTmux(runtime, options, hear, left, sent = () => {
 }) {
   const { claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2, claudeState: claudeState2, readClaude: readClaude2, claudeFile: claudeFile2 } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly2()).filter(([key]) => !key.startsWith("GECKIT_")));
-  const tmux = (args, input) => new Promise((resolve2, reject) => {
-    const child = execFile2("tmux", [...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
+  const program = runtime.tmux ?? findTmux;
+  const tmux = (args, input) => program().then(({ file, server }) => new Promise((resolve2, reject) => {
+    const child = execFile3(file, [...server, ...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null) reject(new Error(stderr.trim() || error.message));
       else resolve2(stdout.trim());
     });
     if (input !== void 0) child.stdin?.end(input);
-  });
+  }));
   if (process.platform === "win32" || options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local macOS and Linux projects.");
-  const name = `claude-${options.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
+  const name = `claude-${options.id.slice(0, 8)}-${randomUUID2().slice(0, 8)}`;
   const alive = () => tmux(["display-message", "-p", "-t", name, "#{pane_dead}"]).then((dead) => dead !== "1", () => false);
   const state = claudeState2(options.root);
   let offset = 0;
@@ -1918,11 +1972,11 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   const imagesIn = async (images) => {
     if (images.length === 0) return [];
-    imagesDirectory ??= await mkdtemp(join5(tmpdir(), "claude-images-"));
+    imagesDirectory ??= await mkdtemp(join6(tmpdir(), "claude-images-"));
     const extensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp" };
     const paths = [];
     for (const image of images) {
-      const path = join5(imagesDirectory, `${randomUUID()}${extensions[image.media] ?? ".img"}`);
+      const path = join6(imagesDirectory, `${randomUUID2()}${extensions[image.media] ?? ".img"}`);
       await writeFile(path, Buffer.from(image.data, "base64"), { mode: 384, flag: "wx" });
       paths.push(path);
     }
@@ -2031,7 +2085,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     }
     const env = environment();
     const omitted = [...OFF_PLAN2, ...Object.keys(planOnly2()).filter((key) => key.startsWith("GECKIT_"))];
-    const config = env.CLAUDE_CONFIG_DIR ?? join5(homedir5(), ".claude");
+    const config = env.CLAUDE_CONFIG_DIR ?? join6(homedir6(), ".claude");
     const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand2(env), ...terminalArgs(options, config)].map(quote).join(" ");
     await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "50", "-c", options.root, launch]);
     if (ended2) {
@@ -2218,16 +2272,17 @@ function planNow(plan2, now) {
   }
   return shown2;
 }
-function usageReader(runtime, { name = "geckit-claude-usage", folder = join5(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
+function usageReader(runtime, { name = "geckit-claude-usage", folder = join6(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
 } } = {}) {
   const { claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2 } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly2()).filter(([key]) => !key.startsWith("GECKIT_")));
-  const tmux = (args) => new Promise((resolve2, reject) => {
-    execFile2("tmux", [...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
+  const program = runtime.tmux ?? findTmux;
+  const tmux = (args) => program().then(({ file, server }) => new Promise((resolve2, reject) => {
+    execFile3(file, [...server, ...args], { env: environment(), windowsHide: true }, (error, stdout, stderr) => {
       if (error !== null) reject(new Error(stderr.trim() || error.message));
       else resolve2(stdout.trim());
     });
-  });
+  }));
   const screen = () => tmux(["capture-pane", "-p", "-J", "-t", name]);
   let plan2;
   let next = 0;
@@ -2316,6 +2371,7 @@ function create(context = {}) {
   };
   const usage = usageReader(claude_runtime_exports, { log });
   log("info", "provider.created");
+  if (process.platform === "darwin" || process.platform === "linux") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
   let known = [];
   return {
     id: "claude-tmux",
@@ -2358,12 +2414,12 @@ function create(context = {}) {
     },
     search: (roots, asked) => searchClaude(roots, asked),
     hidden: (from, to, include) => everyClaude(from, to, include),
-    create: async () => randomUUID(),
+    create: async () => randomUUID2(),
     fork: async (root, id, at2) => {
       const point = await forkPoint(root, id, at2).catch(() => void 0);
       const items = (await readClaudeSession(root, id).catch(() => void 0))?.items ?? [];
       const upTo = items.findLastIndex((item) => "at" in item && item.at !== void 0 && item.at <= at2);
-      return { id: randomUUID(), fork: { from: id, ...point === void 0 ? {} : { at: point } }, begun: false, items: items.slice(0, upTo + 1) };
+      return { id: randomUUID2(), fork: { from: id, ...point === void 0 ? {} : { at: point } }, begun: false, items: items.slice(0, upTo + 1) };
     },
     has: async (root, id) => await claudeFile(root, id) !== void 0,
     read: (root, id) => readClaudeSession(root, id),
@@ -2393,6 +2449,7 @@ function create(context = {}) {
 export {
   create,
   holdTmux,
+  locateTmux,
   planNow,
   terminalScreen,
   usageReader,
