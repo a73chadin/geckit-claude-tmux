@@ -1,4 +1,5 @@
 import { open, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
@@ -15,10 +16,13 @@ export function backgroundTasks(root, session, env, changed) {
   const tasks = new Map()
   let directory
   const output = async (id) => {
+    // Claude Code keeps task output in <temp>/claude-<uid>/ on POSIX and in %TEMP%\claude\ on Windows.
+    const windows = process.platform === 'win32'
+    const temp = env.CLAUDE_CODE_TMPDIR ?? (windows ? tmpdir() : '/tmp')
     directory ??= Promise.all([
-      realpath(env.CLAUDE_CODE_TMPDIR ?? '/tmp').catch(() => env.CLAUDE_CODE_TMPDIR ?? '/tmp'),
+      realpath(temp).catch(() => temp),
       realpath(root).catch(() => root),
-    ]).then(([temp, folder]) => join(temp, `claude-${process.getuid()}`, folder.replace(/[^A-Za-z0-9]/g, '-'), session, 'tasks'))
+    ]).then(([temp, folder]) => join(temp, windows ? 'claude' : `claude-${process.getuid()}`, folder.replace(/[^A-Za-z0-9]/g, '-'), session, 'tasks'))
     return join(await directory, `${id}.output`)
   }
   const keep = (task, silent) => {

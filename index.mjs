@@ -6,11 +6,11 @@ var __export = (target, all) => {
 
 // src/provider.mjs
 import { execFile as execFile3 } from "node:child_process";
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createInterface as createInterface4 } from "node:readline";
-import { mkdir, mkdtemp, open as open4, rm as rm2, stat as stat3, writeFile } from "node:fs/promises";
-import { homedir as homedir6, tmpdir } from "node:os";
+import { mkdir, mkdtemp, open as open4, realpath as realpath3, rm as rm2, stat as stat3, writeFile } from "node:fs/promises";
+import { homedir as homedir6, tmpdir as tmpdir2 } from "node:os";
 import { join as join6 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -1653,6 +1653,7 @@ function searchClaude(roots, asked, foldersOf = folders) {
 
 // src/background-tasks.mjs
 import { open as open3, realpath as realpath2 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join as join4 } from "node:path";
 var object3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var string7 = (value) => typeof value === "string" ? value : "";
@@ -1667,10 +1668,12 @@ function backgroundTasks(root, session, env, changed) {
   const tasks = /* @__PURE__ */ new Map();
   let directory;
   const output = async (id) => {
+    const windows = process.platform === "win32";
+    const temp = env.CLAUDE_CODE_TMPDIR ?? (windows ? tmpdir() : "/tmp");
     directory ??= Promise.all([
-      realpath2(env.CLAUDE_CODE_TMPDIR ?? "/tmp").catch(() => env.CLAUDE_CODE_TMPDIR ?? "/tmp"),
+      realpath2(temp).catch(() => temp),
       realpath2(root).catch(() => root)
-    ]).then(([temp, folder]) => join4(temp, `claude-${process.getuid()}`, folder.replace(/[^A-Za-z0-9]/g, "-"), session, "tasks"));
+    ]).then(([temp2, folder]) => join4(temp2, windows ? "claude" : `claude-${process.getuid()}`, folder.replace(/[^A-Za-z0-9]/g, "-"), session, "tasks"));
     return join4(await directory, `${id}.output`);
   };
   const keep = (task, silent) => {
@@ -1764,17 +1767,45 @@ function backgroundTasks(root, session, env, changed) {
 // src/tmux-binary.mjs
 import { execFile as execFile2 } from "node:child_process";
 import { createHash as createHash2, randomUUID } from "node:crypto";
-import { mkdir as mkdirCache, readFile, rename, rm as rmPart, writeFile as writePart } from "node:fs/promises";
+import { mkdir as mkdirCache, readdir as readdir3, readFile, rename, rm as rmPart, writeFile as writePart } from "node:fs/promises";
 import { homedir as homedir5 } from "node:os";
 import { delimiter as delimiter2, join as join5 } from "node:path";
 var KNOWN = () => ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin", "/home/linuxbrew/.linuxbrew/bin", join5(homedir5(), ".nix-profile", "bin"), "/run/current-system/sw/bin", "/nix/var/nix/profiles/default/bin", join5(homedir5(), ".local", "bin")];
 var tmuxRuns = (file) => new Promise((resolve2) => {
   execFile2(file, ["-V"], { timeout: 5e3, windowsHide: true }, (error) => resolve2(error === null));
 });
+var WINDOWS_KNOWN = (env) => {
+  const local = env.LOCALAPPDATA || join5(homedir5(), "AppData", "Local");
+  return [join5(local, "Microsoft", "WinGet", "Links"), join5(homedir5(), "scoop", "shims"), join5(homedir5(), ".cargo", "bin"), join5(env.ProgramData || "C:\\ProgramData", "chocolatey", "bin")];
+};
+var psmuxRuns = (file) => new Promise((resolve2) => {
+  execFile2(file, ["-V"], { timeout: 5e3, windowsHide: true }, (error, stdout) => resolve2(error === null && /psmux/i.test(stdout)));
+});
+var wingetPackage = async (env) => {
+  const packages = join5(env.LOCALAPPDATA || join5(homedir5(), "AppData", "Local"), "Microsoft", "WinGet", "Packages");
+  const found = await readdir3(packages).catch(() => []);
+  return found.filter((name) => /^marlocarlo\.psmux_/i.test(name)).map((name) => join5(packages, name));
+};
+async function locatePsmux({ env = process.env, known } = {}) {
+  const seen = /* @__PURE__ */ new Set();
+  const path = env[Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH"] ?? "";
+  for (const directory of [...path.split(delimiter2), ...known ?? [...WINDOWS_KNOWN(env), ...await wingetPackage(env)]]) {
+    if (directory === "" || seen.has(directory.toLowerCase())) continue;
+    seen.add(directory.toLowerCase());
+    for (const name of ["psmux.exe", "tmux.exe"]) {
+      const file = join5(directory, name);
+      if (await psmuxRuns(file)) return { file, server: ["-L", "geckit"] };
+    }
+  }
+  throw new Error("psmux is not installed. Install it (winget install marlocarlo.psmux) and try again.");
+}
 var cacheFolder = (env) => process.platform === "darwin" ? join5(homedir5(), "Library", "Caches", "geckit-claude-tmux") : join5(env.XDG_CACHE_HOME || join5(homedir5(), ".cache"), "geckit-claude-tmux");
 var binaryList = () => readFile(new URL("./tmux-binaries.json", import.meta.url), "utf8").then(JSON.parse, () => ({ files: {} }));
-async function locateTmux({ env = process.env, folder = cacheFolder(env), binaries = binaryList, download = fetch, known = KNOWN() } = {}) {
-  if (process.platform !== "darwin" && process.platform !== "linux") throw new Error("Claude Code (tmux) runs on macOS and Linux only.");
+async function locateTmux({ env = process.env, folder, binaries = binaryList, download = fetch, known } = {}) {
+  if (process.platform === "win32") return locatePsmux({ env, known });
+  folder ??= cacheFolder(env);
+  known ??= KNOWN();
+  if (process.platform !== "darwin" && process.platform !== "linux") throw new Error("Claude Code (tmux) runs on macOS, Linux and Windows only.");
   const seen = /* @__PURE__ */ new Set();
   for (const directory of [...(env.PATH ?? "").split(delimiter2), ...known]) {
     if (directory === "" || seen.has(directory)) continue;
@@ -1819,11 +1850,29 @@ var typingDelay = () => 15 + Math.floor(Math.random() * 31);
 var object4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 var string8 = (value) => typeof value === "string" ? value : "";
 var quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-var terminalArgs = (options, config) => [
+var windowsArg = (value) => {
+  if (/["$]/.test(value)) throw new Error(`Claude Code (tmux) cannot pass ${JSON.stringify(value)} to psmux: quotes and dollar signs are not supported.`);
+  return value !== "" && !/\s/.test(value) ? value : `"${value.replace(/(\\+)$/, "$1$1")}"`;
+};
+var settingsArg = async (config) => {
+  const settings = JSON.stringify({ claudeMdExcludes: [join6(config, "GECKIT.md")] });
+  if (process.platform !== "win32") return settings;
+  const folder = join6(tmpdir2(), "geckit-claude-tmux");
+  const file = join6(folder, `settings-${createHash3("sha256").update(settings).digest("hex").slice(0, 16)}.json`);
+  await mkdir(folder, { recursive: true });
+  await writeFile(file, settings);
+  return file;
+};
+var launchLine = ({ claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2 }, env, args = []) => {
+  if (process.platform === "win32") return [claudeCommand2(env), ...args].map(windowsArg).join(" ");
+  const omitted = [...OFF_PLAN2, ...Object.keys(planOnly2()).filter((key) => key.startsWith("GECKIT_"))];
+  return ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand2(env), ...args].map(quote).join(" ");
+};
+var terminalArgs = (options, settings) => [
   "--permission-mode",
   options.mode,
   "--settings",
-  JSON.stringify({ claudeMdExcludes: [join6(config, "GECKIT.md")] }),
+  settings,
   ...options.model === void 0 ? [] : ["--model", options.model],
   ...options.resume ? ["--resume", options.id] : ["--session-id", options.id],
   ...options.resume || options.fork === void 0 ? [] : ["--fork-session", "--resume", options.fork.from, ...options.fork.at === void 0 ? [] : ["--resume-session-at", options.fork.at]]
@@ -1864,7 +1913,7 @@ function terminalScreen(text2) {
 function holdTmux(runtime, options, hear, left, sent = () => {
 }, log = () => {
 }) {
-  const { claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2, claudeState: claudeState2, readClaude: readClaude2, claudeFile: claudeFile2 } = runtime;
+  const { planOnly: planOnly2, claudeState: claudeState2, readClaude: readClaude2, claudeFile: claudeFile2 } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly2()).filter(([key]) => !key.startsWith("GECKIT_")));
   const program = runtime.tmux ?? findTmux;
   const tmux = (args, input) => program().then(({ file, server }) => new Promise((resolve2, reject) => {
@@ -1874,7 +1923,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
     });
     if (input !== void 0) child.stdin?.end(input);
   }));
-  if (process.platform === "win32" || options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local macOS and Linux projects.");
+  if (options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local projects only.");
   const name = `claude-${options.id.slice(0, 8)}-${randomUUID2().slice(0, 8)}`;
   const alive = () => tmux(["display-message", "-p", "-t", name, "#{pane_dead}"]).then((dead) => dead !== "1", () => false);
   const state = claudeState2(options.root);
@@ -1972,7 +2021,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {
   };
   const imagesIn = async (images) => {
     if (images.length === 0) return [];
-    imagesDirectory ??= await mkdtemp(join6(tmpdir(), "claude-images-"));
+    imagesDirectory ??= await mkdtemp(join6(tmpdir2(), "claude-images-"));
     const extensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp" };
     const paths = [];
     for (const image of images) {
@@ -2084,9 +2133,8 @@ function holdTmux(runtime, options, hear, left, sent = () => {
       }
     }
     const env = environment();
-    const omitted = [...OFF_PLAN2, ...Object.keys(planOnly2()).filter((key) => key.startsWith("GECKIT_"))];
     const config = env.CLAUDE_CONFIG_DIR ?? join6(homedir6(), ".claude");
-    const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand2(env), ...terminalArgs(options, config)].map(quote).join(" ");
+    const launch = launchLine(runtime, env, terminalArgs(options, await settingsArg(config)));
     await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "50", "-c", options.root, launch]);
     if (ended2) {
       await tmux(["kill-session", "-t", name]).catch(() => void 0);
@@ -2272,9 +2320,9 @@ function planNow(plan2, now) {
   }
   return shown2;
 }
-function usageReader(runtime, { name = "geckit-claude-usage", folder = join6(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
+function usageReader(runtime, { name = "geckit-claude-usage", folder = join6(tmpdir2(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 6e4, log = () => {
 } } = {}) {
-  const { claudeCommand: claudeCommand2, OFF_PLAN: OFF_PLAN2, planOnly: planOnly2 } = runtime;
+  const { planOnly: planOnly2 } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly2()).filter(([key]) => !key.startsWith("GECKIT_")));
   const program = runtime.tmux ?? findTmux;
   const tmux = (args) => program().then(({ file, server }) => new Promise((resolve2, reject) => {
@@ -2294,10 +2342,9 @@ function usageReader(runtime, { name = "geckit-claude-usage", folder = join6(tmp
     if (await tmux(["has-session", "-t", name]).then(() => true, () => false)) await tmux(["send-keys", "-t", name, "Escape"]);
     else {
       await mkdir(folder, { recursive: true });
-      const env = environment();
-      const omitted = [...OFF_PLAN2, ...Object.keys(planOnly2()).filter((key) => key.startsWith("GECKIT_"))];
-      const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand2(env)].map(quote).join(" ");
-      await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "150", "-c", folder, launch]);
+      const where = process.platform === "win32" ? await realpath3(folder).catch(() => folder) : folder;
+      const launch = launchLine(runtime, environment());
+      await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "150", "-c", where, launch]);
     }
     for (let attempt = 0; ; attempt += 1) {
       if (attempt === 300) throw new Error("Claude Code did not become ready for /usage.");
@@ -2371,7 +2418,7 @@ function create(context = {}) {
   };
   const usage = usageReader(claude_runtime_exports, { log });
   log("info", "provider.created");
-  if (process.platform === "darwin" || process.platform === "linux") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
+  if (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
   let known = [];
   return {
     id: "claude-tmux",
@@ -2449,6 +2496,7 @@ function create(context = {}) {
 export {
   create,
   holdTmux,
+  launchLine,
   locateTmux,
   planNow,
   terminalScreen,

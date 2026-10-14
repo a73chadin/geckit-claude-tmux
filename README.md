@@ -4,7 +4,28 @@ This plugin starts or resumes ordinary interactive Claude Code in tmux. Prompts 
 
 The plugin adds no HTTP hooks or GeckIt system instructions. It excludes the global `GECKIT.md` import for this process and does not install a GeckIt guide. User hooks, project instructions, authentication and native permission checks remain active. Existing instructions or resumed conversation history can still mention GeckIt; this is not a guarantee that Claude cannot infer automation.
 
-Install under Settings > Libraries using `https://github.com/anetrebskii/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and a local macOS or Linux project. Windows is not supported.
+Install under Settings > Libraries using `https://github.com/achadin-ru/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and a local project on macOS, Linux or Windows; on Windows it also needs [psmux](https://github.com/marlocarlo/psmux).
+
+This is a fork of [anetrebskii/geckit-claude-tmux](https://github.com/anetrebskii/geckit-claude-tmux) that adds Windows support; everything else follows upstream.
+
+## Windows
+
+Windows has no tmux, so the plugin drives [psmux](https://github.com/marlocarlo/psmux), a native Windows terminal multiplexer that accepts the same commands over ConPTY. Install it once:
+
+```
+winget install marlocarlo.psmux
+```
+
+The plugin looks for `psmux.exe` or `tmux.exe` on the PATH GeckIt gives it, then in the WinGet links and package folders, Scoop shims, Cargo and Chocolatey, so a GeckIt started before the install still finds it. A `tmux.exe` from MSYS2 or Cygwin is skipped: only a binary whose `-V` names psmux is used. Sessions run on a server of their own, `-L geckit`; attach with `psmux -L geckit attach -t <session>`.
+
+Differences from macOS and Linux:
+
+- psmux reads the session command like a command line, but drops quotes inside an argument and expands `$NAME`. The plugin therefore passes Claude Code's settings through a file under `%TEMP%\geckit-claude-tmux`, and refuses arguments that contain `"` or `$` with a clear error.
+- A psmux session takes its environment from the call that creates it, so the off-plan and GeckIt variables are left out of that call instead of being removed with `env -u`.
+- Background task output is read from `%TEMP%\claude\<project>\<session>\tasks`, where Claude Code keeps it on Windows.
+- The `/usage` session starts in the long form of the temp folder. In the 8.3 form (`C:\Users\JOHNDO~1`) Claude Code treats the user CLAUDE.md imports as files outside the folder and stops on an import prompt.
+
+Checked by hand on Windows 11 with psmux 3.4.0 and Claude Code 2.1.299: sending, multiline and non-Latin prompts, reading replies, native questions and answers, Stop, and plan limits. Tests that rely on POSIX temp folders or shebang scripts are skipped on Windows; `test/windows.test.mjs` covers the Windows paths.
 
 ## Finding tmux
 

@@ -161,7 +161,8 @@ test('refreshes /usage only after sent messages and the cooldown, sharing concur
   }
 })
 
-test('failed checks wait for new messages and failed sends do not trigger retries', async () => {
+// The fake tmux is a shebang script, which Windows cannot run.
+test('failed checks wait for new messages and failed sends do not trigger retries', { skip: process.platform === 'win32' }, async () => {
   const folder = await mkdtemp(join(tmpdir(), 'claude-usage-failure-'))
   const log = join(folder, 'tmux.log')
   const binary = join(folder, 'tmux')

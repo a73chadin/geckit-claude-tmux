@@ -12,7 +12,7 @@
     "loginCommand": "claude auth login",
     "planName": "Claude",
     "localOnly": true,
-    "source": "https://github.com/anetrebskii/geckit-claude-tmux",
+    "source": "https://github.com/achadin-ru/geckit-claude-tmux",
     "instructions": "own"
   }
 }

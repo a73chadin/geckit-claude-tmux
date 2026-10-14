@@ -4,12 +4,14 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { backgroundTasks } from '../src/background-tasks.mjs'
 
+// These fixtures use POSIX temp folders; Windows output paths are covered in windows.test.mjs.
+const posix = { skip: process.platform === 'win32' }
 const timestamp = '2026-10-11T06:41:57.518Z'
 const use = (tool = 'Bash', id = 'use') => ({ type: 'assistant', timestamp, message: { content: [{ type: 'tool_use', id, name: tool, input: { description: 'Watch copy', command: 'tail -f copy.log' } }] } })
 const result = (data, id = 'use') => ({ type: 'user', timestamp, toolUseResult: data, message: { content: [{ type: 'tool_result', tool_use_id: id, content: '' }] } })
 const notice = (id, status, file = '') => ({ type: 'user', isMeta: true, timestamp, message: { content: `<task-notification><task-id>${id}</task-id><status>${status}</status><output-file>${file}</output-file><summary>Background task ${status} (exit code 0)</summary></task-notification>` } })
 
-test('tracks native saved starts and exit markers without treating silence as completion', async () => {
+test('tracks native saved starts and exit markers without treating silence as completion', posix, async () => {
   const folder = await realpath(await mkdtemp('/private/tmp/claude-task-test-'))
   const updates = []
   const tracker = backgroundTasks(folder, 'session', { CLAUDE_CODE_TMPDIR: folder }, (task) => updates.push(task))
@@ -42,7 +44,7 @@ test('tracks native saved starts and exit markers without treating silence as co
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
 
-test('keeps helper output paths and waits for meta completion notices', async () => {
+test('keeps helper output paths and waits for meta completion notices', posix, async () => {
   const folder = await mkdtemp('/private/tmp/claude-helper-test-')
   const file = join(folder, 'agent.jsonl')
   const updates = []
@@ -64,7 +66,7 @@ test('keeps helper output paths and waits for meta completion notices', async ()
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
 
-test('reports failed output and killed notices, preserving finished tasks on process closure', async () => {
+test('reports failed output and killed notices, preserving finished tasks on process closure', posix, async () => {
   const folder = await mkdtemp('/private/tmp/claude-failed-task-')
   const updates = []
   const tracker = backgroundTasks(folder, 'session', {}, (task) => updates.push(task))
@@ -91,7 +93,7 @@ test('reports failed output and killed notices, preserving finished tasks on pro
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
 
-test('restores task history silently and stops unresolved work from the old process', async () => {
+test('restores task history silently and stops unresolved work from the old process', posix, async () => {
   const updates = []
   const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
   await tracker.read(use(), true)
@@ -104,7 +106,7 @@ test('restores task history silently and stops unresolved work from the old proc
   assert.deepEqual(updates.map((task) => [task.id, task.status]), [['old-running', 'stopped'], ['old-completed', 'completed']])
 })
 
-test('ignores sidechains, foreground helpers and invalid task IDs', async () => {
+test('ignores sidechains, foreground helpers and invalid task IDs', posix, async () => {
   const updates = []
   const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
   await tracker.read({ ...result({ backgroundTaskId: 'side' }), isSidechain: true })
@@ -114,7 +116,7 @@ test('ignores sidechains, foreground helpers and invalid task IDs', async () => 
   assert.equal(updates.length, 0)
 })
 
-test('ends tasks whose notice was absorbed mid-turn and reads the saved output path without its full stop', async () => {
+test('ends tasks whose notice was absorbed mid-turn and reads the saved output path without its full stop', posix, async () => {
   const folder = await mkdtemp('/private/tmp/claude-absorbed-task-')
   const file = join(folder, 'b15tpggyl.output')
   const updates = []
@@ -129,7 +131,7 @@ test('ends tasks whose notice was absorbed mid-turn and reads the saved output p
   } finally { await rm(folder, { recursive: true, force: true }) }
 })
 
-test('ends a task from its successful TaskStop result without a notification or exit marker', async () => {
+test('ends a task from its successful TaskStop result without a notification or exit marker', posix, async () => {
   const updates = []
   const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
   await tracker.read(use())
@@ -147,7 +149,7 @@ test('ends a task from its successful TaskStop result without a notification or 
   assert.equal(updates.length, 2, 'duplicate stop results do not re-emit the task')
 })
 
-test('ignores failed, mismatched and unrelated stop results', async () => {
+test('ignores failed, mismatched and unrelated stop results', posix, async () => {
   const updates = []
   const tracker = backgroundTasks('/private/tmp', 'session', {}, (task) => updates.push(task))
   await tracker.read(result({ backgroundTaskId: 'running' }))
@@ -166,7 +168,7 @@ test('ignores failed, mismatched and unrelated stop results', async () => {
   assert.equal(updates[0].status, 'running')
 })
 
-test('recognizes only a final killed marker and preserves the final state', async () => {
+test('recognizes only a final killed marker and preserves the final state', posix, async () => {
   const folder = await mkdtemp('/private/tmp/claude-killed-task-')
   const outputFile = join(folder, 'killed.output')
   const updates = []

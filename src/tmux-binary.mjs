@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir as mkdirCache, readFile, rename, rm as rmPart, writeFile as writePart } from "node:fs/promises";
+import { mkdir as mkdirCache, readdir, readFile, rename, rm as rmPart, writeFile as writePart } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -10,12 +10,47 @@ const tmuxRuns = (file) => new Promise((resolve) => {
   execFile(file, ["-V"], { timeout: 5000, windowsHide: true }, (error) => resolve(error === null));
 });
 
+// Windows has no tmux; psmux takes its place, speaking the same commands over ConPTY.
+// A tmux.exe from MSYS2 or Cygwin cannot host Windows console programs, so only a binary
+// that names itself psmux is accepted.
+const WINDOWS_KNOWN = (env) => {
+  const local = env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
+  return [join(local, "Microsoft", "WinGet", "Links"), join(homedir(), "scoop", "shims"), join(homedir(), ".cargo", "bin"), join(env.ProgramData || "C:\\ProgramData", "chocolatey", "bin")];
+};
+
+const psmuxRuns = (file) => new Promise((resolve) => {
+  execFile(file, ["-V"], { timeout: 5000, windowsHide: true }, (error, stdout) => resolve(error === null && /psmux/i.test(stdout)));
+});
+
+const wingetPackage = async (env) => {
+  const packages = join(env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "Microsoft", "WinGet", "Packages");
+  const found = await readdir(packages).catch(() => []);
+  return found.filter((name) => /^marlocarlo\.psmux_/i.test(name)).map((name) => join(packages, name));
+};
+
+async function locatePsmux({ env = process.env, known } = {}) {
+  const seen = new Set();
+  const path = env[Object.keys(env).find((name) => name.toUpperCase() === "PATH") ?? "PATH"] ?? "";
+  for (const directory of [...path.split(delimiter), ...known ?? [...WINDOWS_KNOWN(env), ...await wingetPackage(env)]]) {
+    if (directory === "" || seen.has(directory.toLowerCase())) continue;
+    seen.add(directory.toLowerCase());
+    for (const name of ["psmux.exe", "tmux.exe"]) {
+      const file = join(directory, name);
+      if (await psmuxRuns(file)) return { file, server: ["-L", "geckit"] };
+    }
+  }
+  throw new Error("psmux is not installed. Install it (winget install marlocarlo.psmux) and try again.");
+}
+
 const cacheFolder = (env) => process.platform === "darwin" ? join(homedir(), "Library", "Caches", "geckit-claude-tmux") : join(env.XDG_CACHE_HOME || join(homedir(), ".cache"), "geckit-claude-tmux");
 
 const binaryList = () => readFile(new URL("./tmux-binaries.json", import.meta.url), "utf8").then(JSON.parse, () => ({ files: {} }));
 
-async function locateTmux({ env = process.env, folder = cacheFolder(env), binaries = binaryList, download = fetch, known = KNOWN() } = {}) {
-  if (process.platform !== "darwin" && process.platform !== "linux") throw new Error("Claude Code (tmux) runs on macOS and Linux only.");
+async function locateTmux({ env = process.env, folder, binaries = binaryList, download = fetch, known } = {}) {
+  if (process.platform === "win32") return locatePsmux({ env, known });
+  folder ??= cacheFolder(env);
+  known ??= KNOWN();
+  if (process.platform !== "darwin" && process.platform !== "linux") throw new Error("Claude Code (tmux) runs on macOS, Linux and Windows only.");
   const seen = new Set();
   for (const directory of [...(env.PATH ?? "").split(delimiter), ...known]) {
     if (directory === "" || seen.has(directory)) continue;
@@ -50,4 +85,4 @@ async function locateTmux({ env = process.env, folder = cacheFolder(env), binari
 let located;
 const findTmux = () => located ??= locateTmux().catch((error) => { located = void 0; throw error; });
 
-export { findTmux, locateTmux };
+export { findTmux, locatePsmux, locateTmux };

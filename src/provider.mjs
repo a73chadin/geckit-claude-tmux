@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -13,9 +13,32 @@ const typingDelay = () => 15 + Math.floor(Math.random() * 31);
 const object = (value) => typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
 const string = (value) => typeof value === "string" ? value : "";
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-const terminalArgs = (options, config) => [
+// psmux splits the session command on spaces outside double quotes, keeps backslashes as they
+// are, drops quotes inside an argument and expands $NAME. So a Windows argument may be quoted
+// only as a whole and must contain neither quotes nor dollar signs; the settings JSON goes
+// through a file for this reason. The session takes its environment from the client call,
+// which already leaves out the off-plan and GeckIt variables.
+const windowsArg = (value) => {
+  if (/["$]/.test(value)) throw new Error(`Claude Code (tmux) cannot pass ${JSON.stringify(value)} to psmux: quotes and dollar signs are not supported.`);
+  return value !== "" && !/\s/.test(value) ? value : `"${value.replace(/(\\+)$/, "$1$1")}"`;
+};
+const settingsArg = async (config) => {
+  const settings = JSON.stringify({ claudeMdExcludes: [join(config, "GECKIT.md")] });
+  if (process.platform !== "win32") return settings;
+  const folder = join(tmpdir(), "geckit-claude-tmux");
+  const file = join(folder, `settings-${createHash("sha256").update(settings).digest("hex").slice(0, 16)}.json`);
+  await mkdir(folder, { recursive: true });
+  await writeFile(file, settings);
+  return file;
+};
+const launchLine = ({ claudeCommand, OFF_PLAN, planOnly }, env, args = []) => {
+  if (process.platform === "win32") return [claudeCommand(env), ...args].map(windowsArg).join(" ");
+  const omitted = [...OFF_PLAN, ...Object.keys(planOnly()).filter((key) => key.startsWith("GECKIT_"))];
+  return ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand(env), ...args].map(quote).join(" ");
+};
+const terminalArgs = (options, settings) => [
   "--permission-mode", options.mode,
-  "--settings", JSON.stringify({ claudeMdExcludes: [join(config, "GECKIT.md")] }),
+  "--settings", settings,
   ...options.model === void 0 ? [] : ["--model", options.model],
   ...options.resume ? ["--resume", options.id] : ["--session-id", options.id],
   ...options.resume || options.fork === void 0 ? [] : ["--fork-session", "--resume", options.fork.from, ...options.fork.at === void 0 ? [] : ["--resume-session-at", options.fork.at]]
@@ -57,7 +80,7 @@ function terminalScreen(text) {
 }
 
 function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {}) {
-  const { claudeCommand, OFF_PLAN, planOnly, claudeState, readClaude, claudeFile } = runtime;
+  const { planOnly, claudeState, readClaude, claudeFile } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly()).filter(([key]) => !key.startsWith("GECKIT_")));
   const program = runtime.tmux ?? findTmux;
   const tmux = (args, input) => program().then(({ file, server }) => new Promise((resolve, reject) => {
@@ -67,7 +90,7 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
     });
     if (input !== void 0) child.stdin?.end(input);
   }));
-  if (process.platform === "win32" || options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local macOS and Linux projects.");
+  if (options.root.startsWith("ssh://")) throw new Error("tmux mode is available for local projects only.");
   const name = `claude-${options.id.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
   const alive = () => tmux(["display-message", "-p", "-t", name, "#{pane_dead}"]).then((dead) => dead !== "1", () => false);
   const state = claudeState(options.root);
@@ -266,9 +289,8 @@ function holdTmux(runtime, options, hear, left, sent = () => {}, log = () => {})
       }
     }
     const env = environment();
-    const omitted = [...OFF_PLAN, ...Object.keys(planOnly()).filter((key) => key.startsWith("GECKIT_"))];
     const config = env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
-    const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand(env), ...terminalArgs(options, config)].map(quote).join(" ");
+    const launch = launchLine(runtime, env, terminalArgs(options, await settingsArg(config)));
     await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "50", "-c", options.root, launch]);
     if (ended) { await tmux(["kill-session", "-t", name]).catch(() => void 0); return; }
     running = true;
@@ -447,7 +469,7 @@ function planNow(plan, now) {
 }
 
 function usageReader(runtime, { name = "geckit-claude-usage", folder = join(tmpdir(), "geckit-claude-usage"), every = () => (15 + Math.random() * 15) * 60000, log = () => {} } = {}) {
-  const { claudeCommand, OFF_PLAN, planOnly } = runtime;
+  const { planOnly } = runtime;
   const environment = () => Object.fromEntries(Object.entries(planOnly()).filter(([key]) => !key.startsWith("GECKIT_")));
   const program = runtime.tmux ?? findTmux;
   const tmux = (args) => program().then(({ file, server }) => new Promise((resolve, reject) => {
@@ -467,10 +489,11 @@ function usageReader(runtime, { name = "geckit-claude-usage", folder = join(tmpd
     if (await tmux(["has-session", "-t", name]).then(() => true, () => false)) await tmux(["send-keys", "-t", name, "Escape"]);
     else {
       await mkdir(folder, { recursive: true });
-      const env = environment();
-      const omitted = [...OFF_PLAN, ...Object.keys(planOnly()).filter((key) => key.startsWith("GECKIT_"))];
-      const launch = ["exec", "env", ...omitted.flatMap((key) => ["-u", key]), `PATH=${env.PATH ?? ""}`, ...env.CLAUDE_CONFIG_DIR === void 0 ? [] : [`CLAUDE_CONFIG_DIR=${env.CLAUDE_CONFIG_DIR}`], claudeCommand(env)].map(quote).join(" ");
-      await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "150", "-c", folder, launch]);
+      // Windows may hand out the temp folder in its 8.3 form (C:\Users\JOHNDO~1); Claude Code then sees the
+      // user CLAUDE.md imports as files outside the folder and stops on an import prompt.
+      const where = process.platform === "win32" ? await realpath(folder).catch(() => folder) : folder;
+      const launch = launchLine(runtime, environment());
+      await tmux(["new-session", "-d", "-s", name, "-x", "140", "-y", "150", "-c", where, launch]);
     }
     for (let attempt = 0; ; attempt += 1) {
       if (attempt === 300) throw new Error("Claude Code did not become ready for /usage.");
@@ -537,7 +560,7 @@ function create(context = {}) {
   const log = (level, event, fields) => { try { context.log?.write(level, event, fields); } catch {} };
   const usage = usageReader(claude, { log });
   log("info", "provider.created");
-  if (process.platform === "darwin" || process.platform === "linux") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
+  if (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32") void findTmux().then(({ server }) => log("info", "tmux.found", { bundled: server.length > 0 }), (error) => log("warn", "tmux.missing", { error: error.message }));
   let known = [];
   return {
     id: "claude-tmux", family: "claude", transport: "tmux",
@@ -591,4 +614,4 @@ function create(context = {}) {
     }, left, (delivery) => usage.sent(delivery), log)
   };
 }
-export { create, holdTmux, locateTmux, planNow, terminalScreen, usageReader, usageScreen };
+export { create, holdTmux, launchLine, locateTmux, planNow, terminalScreen, usageReader, usageScreen };
