@@ -4,7 +4,7 @@ This plugin starts or resumes ordinary interactive Claude Code in tmux. Prompts 
 
 The plugin adds no HTTP hooks or GeckIt system instructions. It excludes the global `GECKIT.md` import for this process and does not install a GeckIt guide. User hooks, project instructions, authentication and native permission checks remain active. Existing instructions or resumed conversation history can still mention GeckIt; this is not a guarantee that Claude cannot infer automation.
 
-Install under Settings > Libraries using `https://github.com/achadin-ru/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and a local project on macOS, Linux or Windows; on Windows it also needs [psmux](https://github.com/marlocarlo/psmux).
+Install under Settings > Libraries using `https://github.com/a73chadin/geckit-claude-tmux`, then enable its assistant entry. Requires `claude` and a local project on macOS, Linux or Windows; on Windows it also needs [psmux](https://github.com/marlocarlo/psmux).
 
 This is a fork of [anetrebskii/geckit-claude-tmux](https://github.com/anetrebskii/geckit-claude-tmux) that adds Windows support; everything else follows upstream.
 
